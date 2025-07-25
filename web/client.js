@@ -56,7 +56,9 @@ function start() {
     // connect audio / video
     pc.addEventListener('track', (evt) => {
         if (evt.track.kind == 'video') {
+                console.log("Video track added");
             document.getElementById('video').srcObject = evt.streams[0];
+
         } else {
             document.getElementById('audio').srcObject = evt.streams[0];
         }

@@ -45,4 +45,61 @@ def llm_response(message,nerfreal:BaseReal):
             result = result+msg[lastpos:]
     end = time.perf_counter()
     logger.info(f"llm Time to last chunk: {end-start}s")
-    nerfreal.put_msg_txt(result)    
+    nerfreal.put_msg_txt(result)
+
+def llm_wenda_response(message,nerfreal:BaseReal):
+    #调用闻达大模型
+    #http://127.0.0.1:17860/api/chat method POST
+    #body内容 "{\"prompt\":\"你是智能百科,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+prompt+"\",\"keyword\":\"你是智能百科,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+prompt+"\",\"temperature\":0.8,\"top_p\":0.8,\"max_length\":4096,\"history\":[]}"
+    start = time.perf_counter()
+    import requests
+    headers = {
+        'Content-Type': 'application/json',
+    }
+    data = {
+        "prompt": "你是智能百科,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+message,
+        "keyword": "你是智能百科,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+message,
+        "temperature": 0.8,
+        "top_p": 0.8,
+        "max_length": 4096,
+        "history": []
+    }
+    url = "http://127.0.0.1:17860/api/chat"
+    response = requests.post(url, headers=headers, json=data)
+    if response.status_code == 200:
+        print(f'llm_wenda_response: {response.text}')
+        result = response.text
+        end = time.perf_counter()
+        logger.info(f"llm_wenda Time to response: {end-start}s")
+        nerfreal.put_msg_txt(result)
+    else:
+        logger.error(f"Error in llm_wenda_response: {response.status_code} - {response.text}")
+
+def llm_java_wenda_response(message,nerfreal:BaseReal):
+    start = time.perf_counter()
+    import requests
+    headers = {
+        'Content-Type': 'application/json',
+    }
+    data = {
+        "prompt": message,
+    }
+    url = "http://127.0.0.1:9885/chatgpt/api/getWendaContent/zhonghang"
+    response = requests.post(url, headers=headers, json=data)
+    # logger.info(f'llm_java_wenda_response: {response.text}')
+    if response.status_code == 200:
+        # logger.info(f'llm_java_wenda_response: {response.text}')
+        # print(f'llm_wenda_response: {response.text}')
+        result = response.text
+        end = time.perf_counter()
+        logger.info(f"llm_wenda Time to response: {end - start}s")
+        # 获取result中的resultStr
+        try:
+            result = response.json().get("resultStr", "")
+        except ValueError:
+            logger.error("Response is not a valid JSON")
+            result = response.text
+        nerfreal.set_result_msg(result)
+        nerfreal.put_msg_txt(result)
+    else:
+        logger.error(f"Error in llm_wenda_response: {response.status_code} - {response.text}")

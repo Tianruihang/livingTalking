@@ -48,6 +48,7 @@ class State(Enum):
     RUNNING=0
     PAUSE=1
 
+API_MESSAGE="http://127.0.0.1:5000/tts"
 class BaseTTS:
     def __init__(self, opt, parent:BaseReal):
         self.opt=opt
@@ -62,6 +63,7 @@ class BaseTTS:
         self.state = State.RUNNING
 
     def flush_talk(self):
+        print( f'flush_talk${self.msgqueue.queue}')
         self.msgqueue.queue.clear()
         self.state = State.PAUSE
 
@@ -70,6 +72,7 @@ class BaseTTS:
             self.msgqueue.put((msg,eventpoint))
 
     def render(self,quit_event):
+        print(f'========================ttsreal render quit_event:{quit_event}==================')
         process_thread = Thread(target=self.process_tts, args=(quit_event,))
         process_thread.start()
     
@@ -80,6 +83,9 @@ class BaseTTS:
                 self.state=State.RUNNING
             except queue.Empty:
                 continue
+            # make text to audio
+            print(f'process_tts msg:{msg}')
+            print(f'self ${self}')
             self.txt_to_audio(msg)
         logger.info('ttsreal thread stop')
     
@@ -87,7 +93,7 @@ class BaseTTS:
         pass
     
 
-###########################################################################################
+#############################################make text to audio ##############################################
 class EdgeTTS(BaseTTS):
     def txt_to_audio(self,msg):
         voicename = self.opt.REF_FILE #"zh-CN-YunxiaNeural"
@@ -100,6 +106,7 @@ class EdgeTTS(BaseTTS):
             return
         
         self.input_stream.seek(0)
+        print(f'edge tts input_stream size:{self.input_stream.getbuffer().nbytes}')
         stream = self.__create_bytes_stream(self.input_stream)
         streamlen = stream.shape[0]
         idx=0
@@ -135,21 +142,56 @@ class EdgeTTS(BaseTTS):
     
     async def __main(self,voicename: str, text: str):
         try:
-            communicate = edge_tts.Communicate(text, voicename)
-
+            print(f'api tts text:{text}')
+            #清空self.input_stream
+            self.input_stream.seek(0)  # 将指针移动到缓冲区开头
+            self.input_stream.truncate()  # 截断缓冲区，清空所有数据
+            #text = "你好，欢迎使用Edge TTS语音合成服务。"
+            # =============================需要替换的部分====================================
+            # communicate = edge_tts.Communicate(text, voicename)
+            # print(f'communicate:{communicate}')
             #with open(OUTPUT_FILE, "wb") as file:
             first = True
-            async for chunk in communicate.stream():
-                if first:
-                    first = False
-                if chunk["type"] == "audio" and self.state==State.RUNNING:
-                    #self.push_audio(chunk["data"])
-                    self.input_stream.write(chunk["data"])
-                    #file.write(chunk["data"])
-                elif chunk["type"] == "WordBoundary":
-                    pass
+            # temp_input_stream = BytesIO()
+            # async for chunk in communicate.stream():
+            #     if first:
+            #         first = False
+            #     if chunk["type"] == "audio" and self.state==State.RUNNING:
+            #         #self.push_audio(chunk["data"])
+            #         print(f'edge tts chunk len:{len(chunk["data"])}')
+            #         temp_input_stream.write(chunk["data"])
+            #         #file.write(chunk["data"])
+            #     elif chunk["type"] == "WordBoundary":
+            #         pass
+            # print(f'edge tts temp_input_stream len:{temp_input_stream}')
+            # print(f"edge tts temp_input_stream size:{temp_input_stream.getbuffer().nbytes}")
+            # 将text转行为 使用URL编码
+
+            json_msg = {'cha_name': '中行数字人', 'character_emotion': 'default', 'text': text, 'text_language': '中文', 'top_k': 6, 'top_p': 0.8, 'temperature': 0.8, 'stream': 'False', 'save_temp': 'True'}
+            print(f'api for tts json_msg:{json_msg}')
+            try:
+                # 发送 POST 请求
+                python_response = requests.post(API_MESSAGE, json=json_msg, timeout=10)
+                print(f'api tts python_response status_code:{python_response.status_code}')
+                if python_response.status_code == 200:
+                    audio_data = python_response.content
+                    if audio_data:
+                        self.input_stream.write(audio_data)
+            except requests.exceptions.RequestException as e:
+                logger.error(f'Error in API request: {e}')
+                # 读取 data目录下的error.wav文件作为错误提示音
+                file = os.path.join(os.path.dirname(__file__), 'data', 'error.wav')
+                if os.path.exists(file):
+                    with open(file, 'rb') as f:
+                        audio_data = f.read()
+                        self.input_stream.write(audio_data)
+            # if python_response.status_code == 200:
+            #     # 获取python_response的中的文件流
+            #     audio_data = python_response.content
+            #     if audio_data:
+            #         self.input_stream.write(audio_data)
         except Exception as e:
-            logger.exception('edgetts')
+            logger.exception(f'apitts is error:{e}')
 
 ###########################################################################################
 class FishTTS(BaseTTS):

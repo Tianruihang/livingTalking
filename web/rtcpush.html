@@ -62,8 +62,17 @@
 		data = e
 		var vid = JSON.parse(data.data); 
 		console.log(typeof(vid),vid)
+          //=========================收到消息则写入前端页面=============
 		//document.getElementsByTagName("video")[0].setAttribute("src", vid["video"]);
-		
+		//判断data是否是字符串,且字符串中包含 questionText 字段
+              if (typeof(vid) === 'string' && vid.includes("questionText")) {
+                // 如果是字符串，解析为 JSON 对象
+                vid = JSON.parse(vid);
+                // 如果包含 questionText 字段，则输出
+                if (vid.hasOwnProperty("questionText")) {
+                  console.log("Received questionText:", vid.questionText);
+                }
+              }
 	  };
 	  ws.onclose = function(e) {
 		console.log('Closed');

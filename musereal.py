@@ -52,6 +52,7 @@ def load_model():
     # load model weights
     audio_processor,vae, unet, pe = load_all_model()
     device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()) else "cpu"))
+    print( "=================device:", device)
     timesteps = torch.tensor([0], device=device)
     pe = pe.half()
     vae.vae = vae.vae.half()
@@ -383,7 +384,7 @@ class MuseReal(BaseReal):
             #     count=0
             #     totaltime=0
             if video_track._queue.qsize()>=1.5*self.opt.batch_size:
-                logger.debug('sleep qsize=%d',video_track._queue.qsize())
+                # logger.debug('sleep qsize=%d',video_track._queue.qsize())
                 time.sleep(0.04*video_track._queue.qsize()*0.8)
             # if video_track._queue.qsize()>=5:
             #     print('sleep qsize=',video_track._queue.qsize())
@@ -393,5 +394,5 @@ class MuseReal(BaseReal):
             # if delay > 0:
             #     time.sleep(delay)
         self.render_event.clear() #end infer process render
-        logger.info('musereal thread stop')
+        logger.info('=================musereal thread stop====================')
             

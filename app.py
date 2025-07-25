@@ -36,7 +36,7 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.rtcrtpsender import RTCRtpSender
 from webrtc import HumanPlayer
 from basereal import BaseReal
-from llm import llm_response
+from llm import llm_response,llm_wenda_response,llm_java_wenda_response
 
 import argparse
 import random
@@ -45,7 +45,7 @@ import asyncio
 import torch
 from typing import Dict
 from logger import logger
-
+from redis_global import redis_manager
 
 app = Flask(__name__)
 #sockets = Sockets(app)
@@ -138,17 +138,26 @@ async def human(request):
     sessionid = params.get('sessionid',0)
     if params.get('interrupt'):
         nerfreals[sessionid].flush_talk()
-
     if params['type']=='echo':
         nerfreals[sessionid].put_msg_txt(params['text'])
     elif params['type']=='chat':
-        res=await asyncio.get_event_loop().run_in_executor(None, llm_response, params['text'],nerfreals[sessionid])                         
+        #====================替换大模型==================
+        await asyncio.get_event_loop().run_in_executor(None, llm_java_wenda_response, params['text'],nerfreals[sessionid])
         #nerfreals[sessionid].put_msg_txt(res)
-
+        result_msg = nerfreals[sessionid].get_result_msg()
+        # 检查是否为 None 或非字符串类型
+        try:
+            msg_dict = json.loads(result_msg)
+            res = msg_dict.get("text", "")
+            print("text内容是：", res)
+        except json.JSONDecodeError:
+            print("result_msg 不是合法的 JSON 格式")
+        redis_manager.set_max_cache_size(770)
+        redis_manager.set_current_frame("current_frame",100)
     return web.Response(
         content_type="application/json",
         text=json.dumps(
-            {"code": 0, "data":"ok"}
+            {"code": 0, "data": res if 'res' in locals() else "ok"}
         ),
     )
 

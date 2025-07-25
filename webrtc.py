@@ -61,6 +61,12 @@ class PlayerStreamTrack(MediaStreamTrack):
             self.framecount = 0
             self.lasttime = time.perf_counter()
             self.totaltime = 0
+        self.frame_range_start = 0
+        self.frame_range_end = 500
+        self.frame_cache_count = 0
+        self.cached_frames = []
+        self.loop_index = 0
+        self.caching_complete = False
     
     _start: float
     _timestamp: int
@@ -108,7 +114,7 @@ class PlayerStreamTrack(MediaStreamTrack):
             return self._timestamp, AUDIO_TIME_BASE
 
     async def recv(self) -> Union[Frame, Packet]:
-        # frame = self.frames[self.counter % 30]            
+        # frame = self.frames[self.counter % 30]
         self._player._start(self)
         # if self.kind == 'video':
         #     frame = await self._queue.get()
@@ -130,6 +136,7 @@ class PlayerStreamTrack(MediaStreamTrack):
         pts, time_base = await self.next_timestamp()
         frame.pts = pts
         frame.time_base = time_base
+        #打印 self._player
         if eventpoint:
             self._player.notify(eventpoint)
         if frame is None:
@@ -140,11 +147,12 @@ class PlayerStreamTrack(MediaStreamTrack):
             self.framecount += 1
             self.lasttime = time.perf_counter()
             if self.framecount==100:
-                mylogger.info(f"------actual avg final fps:{self.framecount/self.totaltime:.4f}")
+                # mylogger.info(f"------actual avg final fps:{self.framecount/self.totaltime:.4f}")
                 self.framecount = 0
                 self.totaltime=0
+
         return frame
-    
+
     def stop(self):
         super().stop()
         if self._player is not None:
@@ -197,6 +205,7 @@ class HumanPlayer:
 
     def _start(self, track: PlayerStreamTrack) -> None:
         self.__started.add(track)
+        logger.info(f'-------------------start track {track.kind}, started={len(self.__started)}')
         if self.__thread is None:
             self.__log_debug("Starting worker thread")
             self.__thread_quit = threading.Event()

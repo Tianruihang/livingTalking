@@ -38,14 +38,14 @@ import asyncio
 from av import AudioFrame, VideoFrame
 from wav2lip.models import Wav2Lip
 from basereal import BaseReal
-
+from redis_global import redis_manager
 #from imgcache import ImgCache
 
 from tqdm import tqdm
 from logger import logger
 
 device = "cuda" if torch.cuda.is_available() else ("mps" if (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()) else "cpu")
-print('Using {} for inference.'.format(device))
+print('=================================================Using {} for inference.'.format(device))
 
 def _load(checkpoint_path):
 	if device == 'cuda':
@@ -64,7 +64,6 @@ def load_model(path):
 	for k, v in s.items():
 		new_s[k.replace('module.', '')] = v
 	model.load_state_dict(new_s)
-
 	model = model.to(device)
 	return model.eval()
 
@@ -106,9 +105,12 @@ def __mirror_index(size, index):
     #size = len(self.coord_list_cycle)
     turn = index // size
     res = index % size
+    redis_manager.set_current_frame("mirror_index", index)
     if turn % 2 == 0:
+        redis_manager.set_current_frame("mirror_turn",1)
         return res
     else:
+        redis_manager.set_current_frame("mirror_turn",-1)
         return size - res - 1 
 
 def inference(quit_event,batch_size,face_list_cycle,audio_feat_queue,audio_out_queue,res_frame_queue,model):
@@ -134,14 +136,24 @@ def inference(quit_event,batch_size,face_list_cycle,audio_feat_queue,audio_out_q
             
         is_all_silence=True
         audio_frames = []
+        length = 300
+        if redis_manager.has_max_cache_size()  != 0:
+            result = redis_manager.has_max_cache_size()
+            #转int
+            length = int(result)
+            # print(f'redis_manager has_max_cache_size={length}')
+        if redis_manager.get_current_frame("current_frame") != 0:
+            index = redis_manager.get_current_frame("current_frame")
+            # print(f'redis_manager get_current_frame={index}')
+            redis_manager.delete_current_frame("current_frame")
         for _ in range(batch_size*2):
             frame,type,eventpoint = audio_out_queue.get()
             audio_frames.append((frame,type,eventpoint))
             if type==0:
                 is_all_silence=False
-
         if is_all_silence:
             for i in range(batch_size):
+                # print(f'__mirror_index(length,index) ={__mirror_index(length, index)}, length={length}, index={index}, i={i},batch_size : {batch_size}')
                 res_frame_queue.put((None,__mirror_index(length,index),audio_frames[i*2:i*2+2]))
                 index = index + 1
         else:
@@ -211,6 +223,7 @@ class LipReal(BaseReal):
         
         while not quit_event.is_set():
             try:
+                # print(f'infer silence res_frame_queue={self.res_frame_queue}')
                 res_frame,idx,audio_frames = self.res_frame_queue.get(block=True, timeout=1)
             except queue.Empty:
                 continue
@@ -244,6 +257,7 @@ class LipReal(BaseReal):
             image = combine_frame #(outputs['image'] * 255).astype(np.uint8)
             image[0,:] &= 0xFE
             new_frame = VideoFrame.from_ndarray(image, format="bgr24")
+            #只播放idx为300以内的视频
             asyncio.run_coroutine_threadsafe(video_track._queue.put((new_frame,None)), loop)
             self.record_video_data(image)
 
@@ -258,7 +272,7 @@ class LipReal(BaseReal):
                 asyncio.run_coroutine_threadsafe(audio_track._queue.put((new_frame,eventpoint)), loop)
                 self.record_audio_data(frame)
                 #self.notify(eventpoint)
-        logger.info('lipreal process_frames thread stop') 
+        logger.info('===============================lipreal process_frames thread stop================================')
             
     def render(self,quit_event,loop=None,audio_track=None,video_track=None):
         #if self.opt.asr:
@@ -268,7 +282,8 @@ class LipReal(BaseReal):
         self.init_customindex()
         process_thread = Thread(target=self.process_frames, args=(quit_event,loop,audio_track,video_track))
         process_thread.start()
-
+        #执行render方法
+        print(f'========================lipreal render thread start, sessionid={self.sessionid},self.batch_size ={self.batch_size}========================')
         Thread(target=inference, args=(quit_event,self.batch_size,self.face_list_cycle,
                                            self.asr.feat_queue,self.asr.output_queue,self.res_frame_queue,
                                            self.model,)).start()  #mp.Process
@@ -288,7 +303,7 @@ class LipReal(BaseReal):
             #     print('sleep qsize=',video_track._queue.qsize())
             #     time.sleep(0.04*video_track._queue.qsize()*0.8)
             if video_track._queue.qsize()>=5:
-                logger.debug('sleep qsize=%d',video_track._queue.qsize())
+                # logger.debug('sleep qsize=%d',video_track._queue.qsize())
                 time.sleep(0.04*video_track._queue.qsize()*0.8)
                 
             # delay = _starttime+_totalframe*0.04-time.perf_counter() #40ms

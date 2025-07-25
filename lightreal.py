@@ -64,6 +64,7 @@ def load_model(opt):
     return audio_processor
 
 def load_avatar(avatar_id):
+    print(f'start to load_avatar =======================================' + avatar_id)
     avatar_path = f"./data/avatars/{avatar_id}"
     full_imgs_path = f"{avatar_path}/full_imgs" 
     face_imgs_path = f"{avatar_path}/face_imgs" 
@@ -250,16 +251,20 @@ class LightReal(BaseReal):
 
    
     def process_frames(self,quit_event,loop=None,audio_track=None,video_track=None):
-        
+        #打印日志
+        logger.info('lightreal process_frames thread start')
         while not quit_event.is_set():
             try:
                 res_frame,idx,audio_frames = self.res_frame_queue.get(block=True, timeout=1)
             except queue.Empty:
                 continue
+            logger.info(
+                f'----------------processing custom video type {audiotype} index {self.custom_index[audiotype]}')
             if audio_frames[0][1]!=0 and audio_frames[1][1]!=0: #全为静音数据，只需要取fullimg
                 self.speaking = False
                 audiotype = audio_frames[0][1]
                 if self.custom_index.get(audiotype) is not None: #有自定义视频
+
                     mirindex = self.mirror_index(len(self.custom_img_cycle[audiotype]),self.custom_index[audiotype])
                     combine_frame = self.custom_img_cycle[audiotype][mirindex]
                     self.custom_index[audiotype] += 1
@@ -309,6 +314,7 @@ class LightReal(BaseReal):
 
         self.tts.render(quit_event)
         self.init_customindex()
+        logger.info('--------------------------lightreal render thread start')
         process_thread = Thread(target=self.process_frames, args=(quit_event,loop,audio_track,video_track))
         process_thread.start()
         Thread(target=inference, args=(quit_event,self.batch_size,self.face_list_cycle,self.asr.feat_queue,self.asr.output_queue,self.res_frame_queue,
@@ -330,7 +336,7 @@ class LightReal(BaseReal):
             #     print('sleep qsize=',video_track._queue.qsize())
             #     time.sleep(0.04*video_track._queue.qsize()*0.8)
             if video_track._queue.qsize()>=5:
-                logger.debug('sleep qsize=%d',video_track._queue.qsize())
+                # logger.debug('sleep qsize=%d',video_track._queue.qsize())
                 time.sleep(0.04*video_track._queue.qsize()*0.8)
                 
             # delay = _starttime+_totalframe*0.04-time.perf_counter() #40ms

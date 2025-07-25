@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>兴元数字人交互平台</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link href="./bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="./bootstrap-icons.css">
     <style>
         :root {
             --primary-color: #4361ee;
@@ -52,6 +52,7 @@
         .video-container {
             position: relative;
             width: 100%;
+            height: 100vh;
             background-color: #000;
             border-radius: var(--border-radius);
             overflow: hidden;
@@ -61,10 +62,15 @@
         }
 
         video {
-            max-width: 100%;
+            width: 100%;
+            height: 100%;
             max-height: 100%;
+            max-width: 100%;
+            object-fit: cover;
             display: block;
+            margin: auto;
             border-radius: var(--border-radius);
+            background-color: #000;
         }
 
         .controls-container {
@@ -263,6 +269,97 @@
         .recording-pulse {
             animation: pulse 1.5s infinite;
         }
+
+        /* 在原有样式表中添加以下样式 */
+        .chat-container {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            width: 30vw;
+            height: 50vh;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 8px;
+            backdrop-filter: blur(5px);
+            color: white;
+            z-index: 999;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+        }
+
+          .chat-messages {
+            flex: 1;
+            padding: 12px;
+            overflow-y: auto;
+            word-break: break-word;
+        }
+
+        .chat-input {
+            display: flex;
+            gap: 8px;
+            padding: 12px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .chat-input input {
+            flex: 1;
+            padding: 8px;
+            border: none;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.9);
+        }
+
+        .chat-input button {
+            padding: 8px 16px;
+            background: #4CAF50;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .chat-input button:hover {
+            background: #45a049;
+        }
+
+      .visualizer-container {
+        position: fixed; /* 浮动于浏览器窗口 */
+        left: 50%;
+        bottom: 40px;
+        transform: translateX(-50%); /* 水平居中修正 */
+         z-index: 999;
+        background: rgba(0, 0, 0, 0.7); /* 可选：半透明背景 */
+        padding: 1px;
+        display: flex;
+        align-items: flex-end;
+      }
+
+    .visualizer-top {
+        position: fixed; /* 浮动于浏览器窗口 */
+        left: 50%;
+        top: 60px;
+        transform: translateX(-50%); /* 水平居中修正 */
+         z-index: 999;
+        padding: 1px;
+        display: flex;
+        align-items: flex-end;
+      }
+
+      .progress-container {
+        width: 300px;
+        height: 20px;
+        background-color: #ccc;
+        border-radius: 10px;
+        overflow: hidden;
+      }
+
+      .progress-bar {
+        width: 0%;
+        height: 100%;
+        background-color: #4caf50;
+        transition: width 0.3s ease;
+      }
         
         @keyframes pulse {
             0% {
@@ -273,6 +370,17 @@
             }
             100% {
                 box-shadow: 0 0 0 0 rgba(220, 53, 69, 0);
+            }
+        }
+
+                /* 移动端适配 */
+        @media (max-width: 768px) {
+            .chat-container {
+                width: 80vw;
+                height: 30vh;
+                left: 10px;
+                right: 10px;
+                bottom: 10px;
             }
         }
     </style>
@@ -298,12 +406,32 @@
                     <div class="card-body p-0">
                         <div class="video-container">
                             <video id="video" autoplay playsinline></video>
+                            <button id="fullscreen-btn" class="btn btn-sm btn-outline-light position-absolute" style="top: 15px; left: 15px; z-index: 10;">
+                                <i class="bi bi-arrows-fullscreen"></i>
+                            </button>
                             <div class="recording-indicator" id="recording-indicator">
                                 <div class="blink"></div>
                                 <span>录制中</span>
                             </div>
+                            <!-- 在body末尾添加聊天框结构 -->
+                             <div class="visualizer-top" id="visualizerTop"  style="display: none">
+                                <h1>请说小元来唤醒我</h1>
+                            </div>
+                            <div class="chat-container">
+                                <div class="chat-messages" id="chatMessages"></div>
+                                <div class="chat-input">
+                                    <input type="text" id="chatInput" placeholder="输入消息...">
+                                    <button id="sendBtn">发送</button>
+                                </div>
+                            </div>
+
+                             <!-- 音频可视化容器 -->
+                            <div class="visualizer-container" id="visualizer" style="display: none">
+                                <div class="progress-container">
+                                    <div class="progress-bar" id="audioLevel"></div>
+                                </div>
+                            </div>
                         </div>
-                        
                         <div class="controls-container">
                             <div class="row">
                                 <div class="col-md-6 mb-3">
@@ -316,6 +444,9 @@
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <div class="d-flex">
+                                         <button class="btn btn-outline-primary flex-grow-1 me-2" id="mark">
+                                            <i class="bi bi-record-fill"></i> 启动麦克风
+                                        </button>
                                         <button class="btn btn-outline-primary flex-grow-1 me-2" id="btn_start_record">
                                             <i class="bi bi-record-fill"></i> 开始录制
                                         </button>
@@ -418,9 +549,24 @@
 
     <script src="client.js"></script>
     <script src="srs.sdk.js"></script>
-    <script src="./bootstrap.bundle.min.js"></script>
-    <script src="./jquery-3.6.0.min.js"></script>
+    <script src="bootstrap.bundle.min.js"></script>
+    <script src="jquery-3.6.0.min.js"></script>
+    <script src="socket.min.js"></script>
     <script>
+            document.addEventListener("DOMContentLoaded", function() {
+              setTimeout(function() {
+                var btn = document.getElementById("start");
+                if (btn) btn.click();
+                //获取麦克风
+                var markBtn = document.getElementById("mark");
+                if (markBtn) markBtn.click();
+              }, 4000); // 4 秒后触发
+            });
+   </script>
+    <script>
+        const visualizerContainer = document.getElementById('visualizer');
+        const  visualizerTop = document.getElementById('visualizerTop')
+        let volumeBars,audioStream,audioContext,analyser, scriptProcessor;
         $(document).ready(function() {
             $('#video-size-slider').on('input', function() {
                 const value = $(this).val();
@@ -436,6 +582,7 @@
                 switch(status) {
                     case 'connected':
                         statusIndicator.addClass('status-connected');
+                        $('#visualizerTop').show()
                         statusText.text('已连接');
                         break;
                     case 'connecting':
@@ -445,11 +592,86 @@
                     case 'disconnected':
                     default:
                         statusIndicator.addClass('status-disconnected');
+                        $('#visualizerTop').hide()
                         statusText.text('未连接');
                         break;
                 }
             }
 
+            const socket = io("https://192.168.1.28:8011");
+
+            socket.on('connect', () => {
+            console.log('WebSocket 已连接');
+            });
+
+            socket.on('message', (data) => {
+                // 判断是否显示visualizer-container
+                if (data.text === '开始可视化') {
+                    console.log('开始可视化');
+                    $('#visualizer').show();
+                } else if (data.text === '停止可视化') {
+                    console.log('停止可视化');
+                    $('#visualizer').hide();
+                } else {
+                    addChatMessage(data.text, 'system');  // 使用你已有的函数显示到右侧聊天框
+                    sendMessage(data.text);  // 发送到视频流
+                        //调用human
+                        fetch('/human', {
+                            body: JSON.stringify({
+                            text: data.text,
+                            type: 'chat',
+                            interrupt: true,
+                            sessionid: parseInt(document.getElementById('sessionid').value),
+                        }),
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        method: 'POST'
+                    })
+                    .then(res => res.json())  // 解析为 JSON
+                    .then(json => {
+                        console.log('res json:', json);
+                        if (json.code === 0) {
+                            // 解码返回的 Unicode 字符串
+                            const decodedText = json.data;
+                            console.log('消息发送成功，返回内容：', decodedText);
+                            addChatMessage( decodedText, 'system');
+                        } else {
+                            console.error('接口返回错误：', json);
+                        }
+                    })
+                    .catch(err => {
+                        console.error('发送消息时发生错误:', err);
+                    });
+                }
+            });
+
+            socket.on('disconnect', () => {
+            console.log('WebSocket 已断开');
+            });
+            // 获取聊天相关DOM元素
+            const chatInput = document.getElementById('chatInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const chatMessages = document.getElementById('chatMessages');
+
+            // 发送消息功能
+            function sendMessage(message) {
+                if (message) {
+                    // 创建消息元素
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = 'message';
+                    messageDiv.textContent = message;
+
+                    // 添加消息到聊天框
+                    chatMessages.appendChild(messageDiv);
+
+                    // 清空输入框
+                    chatInput.value = '';
+
+                    // 自动滚动到底部
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                }
+            }
             // 添加聊天消息
             function addChatMessage(message, type = 'user') {
                 const messagesContainer = $('#chat-messages');
@@ -465,6 +687,41 @@
                 messagesContainer.append(messageElement);
                 messagesContainer.scrollTop(messagesContainer[0].scrollHeight);
             }
+
+            let isFull = false;
+
+            function enterFullscreen() {
+                const videoContainer = document.querySelector('.video-container');
+
+                // 设置容器高度为屏幕高度
+                videoContainer.style.height = window.innerHeight + 'px';
+
+                if (videoContainer.requestFullscreen) {
+                    videoContainer.requestFullscreen();
+                } else if (videoContainer.webkitRequestFullscreen) {
+                    videoContainer.webkitRequestFullscreen();
+                } else if (videoContainer.msRequestFullscreen) {
+                    videoContainer.msRequestFullscreen();
+                }
+            }
+
+            function exitFullscreen() {
+                document.exitFullscreen();
+
+                // 恢复容器原始高度
+                const videoContainer = document.querySelector('.video-container');
+                videoContainer.style.height = '';
+            }
+
+            // 全屏按钮点击事件
+            $('#fullscreen-btn').click(function () {
+                if (!isFull) {
+                    enterFullscreen();
+                } else {
+                    exitFullscreen();
+                }
+                isFull = !isFull;
+            });
 
             // 开始/停止按钮
             $('#start').click(function() {
@@ -497,6 +754,150 @@
                 $('#start').show();
                 updateConnectionStatus('disconnected');
             });
+
+             $('#mark').click(function() {
+                 startListen1()
+             });
+
+            let audioContext;
+            let audioStream;
+            let analyser;
+
+            let audioWS = null;
+            let processor = null;
+
+            async function startListen1() {
+                try {
+                    // 1. 判断是否支持麦克风
+                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                        alert("当前浏览器不支持麦克风访问");
+                        return;
+                    }
+
+                    // 2. 简化音频约束，兼容安卓系统默认浏览器
+                    const constraints = { audio: true };
+
+                    // 3. 请求麦克风权限
+                    audioStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    console.log("麦克风访问成功");
+
+                    // 4. 创建 AudioContext（兼容处理）
+                    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                    audioContext = new AudioContextClass();
+
+                    // 5. WebView 中 audioContext 可能默认 suspended，需要恢复
+                    if (audioContext.state === 'suspended') {
+                        await audioContext.resume();
+                    }
+
+                    // 6. 创建音频分析器
+                    const source = audioContext.createMediaStreamSource(audioStream);
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = 256;
+
+                    const bufferLength = analyser.frequencyBinCount;
+                    const dataArray = new Uint8Array(bufferLength);
+
+                    // 7. 可视化更新循环
+                    function update() {
+                        analyser.getByteFrequencyData(dataArray);
+                        updateVisualizer(dataArray);
+                        requestAnimationFrame(update);
+                    }
+
+                    createVisualizer(); // 你的可视化实现
+                    update();
+                    //创建websock推送数据到后端
+                    audioWS = new WebSocket("wss://192.168.1.28:8011/audio");
+                    audioWS.binaryType = "arraybuffer";
+
+                    audioWS.onopen = () => {
+                        console.log("🔗 语音 WebSocket 已连接");
+                        audioWS.send(JSON.stringify({
+                            type: "meta",
+                            sampleRate: audioContext.sampleRate
+                        }));
+                    };
+                    audioWS.onclose = () => {
+                        console.warn("❌ 语音 WebSocket 已断开");
+                    };
+                    audioWS.onerror = (e) => {
+                        console.error("WebSocket 错误:", e);
+                    };
+
+                    // 7. 创建处理器采样音频数据为 Int16 PCM
+                    processor = audioContext.createScriptProcessor(2048, 1, 1);
+
+                    processor.onaudioprocess = (e) => {
+                        const input = e.inputBuffer.getChannelData(0);
+                        const pcmData = new Int16Array(input.length);
+
+                        for (let i = 0; i < input.length; i++) {
+                            const s = Math.max(-1, Math.min(1, input[i]));
+                            pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                        }
+
+                        // 通过 WebSocket 发送音频数据
+                        if (audioWS && audioWS.readyState === WebSocket.OPEN) {
+                            audioWS.send(pcmData.buffer);
+                        }
+                    };
+
+                    // 8. 连接处理器
+                    source.connect(analyser);     // 可视化
+                    source.connect(processor);    // 音频推送
+                    processor.connect(audioContext.destination);  // 避免被GC销毁
+
+                } catch (err) {
+                    console.error("麦克风获取失败:", err);
+
+                    if (err.name === "NotAllowedError") {
+                        alert("权限被拒绝，请前往设置中开启麦克风权限。");
+                    } else if (err.name === "NotFoundError") {
+                        alert("未检测到麦克风设备。");
+                    } else {
+                        alert(`无法访问麦克风: ${err.message}`);
+                    }
+                }
+
+            }
+            // 创建音频可视化条
+            function createVisualizer() {
+                visualizerContainer.innerHTML = '';
+                volumeBars = [];
+
+                // 创建16个柱状条
+                for (let i = 0; i < 16; i++) {
+                    const bar = document.createElement('div');
+                    bar.className = 'visualizer-bar';
+                    bar.style.height = '3px';
+                    visualizerContainer.appendChild(bar);
+                    volumeBars.push(bar);
+                }
+            }
+
+            // 更新音频可视化
+            function updateVisualizer(dataArray) {
+                if (!volumeBars.length) return;
+
+                let sum = 0;
+                for (let i = 0; i < dataArray.length; i++) {
+                    sum += dataArray[i];
+                }
+
+                // 更新频谱柱状图
+                const barCount = volumeBars.length;
+                for (let i = 0; i < barCount; i++) {
+                    const barIndex = Math.floor(i * dataArray.length / barCount);
+                    const value = dataArray[barIndex];
+                    const barHeight = (value / 256) * 40 + 3;
+                    volumeBars[i].style.height = `${barHeight}px`;
+                    volumeBars[i].style.width = '10px'
+
+                    const hue = (i / barCount) * 360; // 不同 bar 不同色相
+                    volumeBars[i].style.backgroundColor = `hsl(${hue}, 100%, 60%)`;
+                }
+            }
 
             // 录制功能
             $('#btn_start_record').click(function() {
@@ -555,7 +956,6 @@
                 if (!message.trim()) return;
                 
                 console.log('Sending echo message:', message);
-                
                 fetch('/human', {
                     body: JSON.stringify({
                         text: message,
@@ -579,8 +979,6 @@
                 var message = $('#chat-message').val();
                 if (!message.trim()) return;
                 
-                console.log('Sending chat message:', message);
-                
                 fetch('/human', {
                     body: JSON.stringify({
                         text: message,
@@ -592,6 +990,21 @@
                         'Content-Type': 'application/json'
                     },
                     method: 'POST'
+                })
+                .then(res => res.json())  // 解析为 JSON
+                .then(json => {
+                    console.log('res json:', json);
+                    if (json.code === 0) {
+                        // 解码返回的 Unicode 字符串
+                        const decodedText = json.data;
+                        console.log('消息发送成功，返回内容：', decodedText);
+                        addChatMessage( decodedText, 'system');
+                    } else {
+                        console.error('接口返回错误：', json);
+                    }
+                })
+                .catch(err => {
+                    console.error('发送消息时发生错误:', err);
                 });
                 
                 addChatMessage(message, 'user');
