@@ -19,7 +19,7 @@
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: "SimHei", "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
             background-color: var(--background-color);
             color: var(--text-color);
             min-height: 100vh;
@@ -150,6 +150,62 @@
             border-left: 4px solid var(--primary-color);
         }
 
+        /* 基础气泡样式 */
+        .user-left-message,
+        .system-left-message {
+          position: relative;
+          padding: 12px 15px;
+          border-radius: 10px;
+          margin: 10px 0;
+          max-width: 70%;
+          line-height: 1.5;
+          word-wrap: break-word;
+          box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        /* （右侧气泡） */
+        .user-left-message {
+          background-color: #c91520;  /* 蓝色背景 */
+          color: white;
+          align-self: flex-end;        /* 右侧对齐 */
+          margin-left: 30%;            /* 留出左侧空间 */
+        }
+
+        /* 箭头（右侧三角） */
+        .user-left-message::before {
+          content: '';
+          position: absolute;
+          top: 15px;
+          right: -10px;                /* 定位到右侧外部 */
+          width: 0;
+          height: 0;
+          border: 10px solid transparent;
+          border-left-color: #c91520;  /* 箭头颜色与背景一致 */
+          border-right: 0;
+          border-top: 0;
+        }
+
+        /* 系统消息（左侧气泡） */
+        .system-left-message {
+          background-color: #007aff;   /* 浅灰色背景 */
+          color: white;
+          align-self: flex-start;      /* 左侧对齐 */
+        }
+
+        /* 系统消息箭头（左侧三角） */
+        .system-left-message::before {
+          content: '';
+          position: absolute;
+          top: 15px;
+          left: -10px;                 /* 定位到左侧外部 */
+          width: 0;
+          height: 0;
+          border: 10px solid transparent;
+          border-right-color: #007aff; /* 箭头颜色与背景一致 */
+          border-left: 0;
+          border-top: 0;
+        }
+
         .system-message {
             background-color: #f1f8e9;
             border-left: 4px solid #8bc34a;
@@ -277,10 +333,10 @@
             left: 20px;
             width: 30vw;
             height: 50vh;
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(0, 0, 0, 0.2);
             border-radius: 8px;
             backdrop-filter: blur(5px);
-            color: white;
+            color: black;
             z-index: 999;
             display: flex;
             flex-direction: column;
@@ -338,7 +394,7 @@
     .visualizer-top {
         position: fixed; /* 浮动于浏览器窗口 */
         left: 50%;
-        top: 60px;
+        top: 140px;
         transform: translateX(-50%); /* 水平居中修正 */
          z-index: 999;
         padding: 1px;
@@ -373,6 +429,11 @@
             }
         }
 
+        @keyframes rainbowText {
+          0% { background-position: 0% 50%; }
+          100% { background-position: 100% 50%; }
+        }
+
                 /* 移动端适配 */
         @media (max-width: 768px) {
             .chat-container {
@@ -405,7 +466,7 @@
                     </div>
                     <div class="card-body p-0">
                         <div class="video-container">
-                            <video id="video" autoplay playsinline></video>
+                            <video id="video" autoplay playsinline ></video>
                             <button id="fullscreen-btn" class="btn btn-sm btn-outline-light position-absolute" style="top: 15px; left: 15px; z-index: 10;">
                                 <i class="bi bi-arrows-fullscreen"></i>
                             </button>
@@ -415,11 +476,18 @@
                             </div>
                             <!-- 在body末尾添加聊天框结构 -->
                              <div class="visualizer-top" id="visualizerTop"  style="display: none">
-                                <h1>请说小元来唤醒我</h1>
+                                <h1 style="
+                                    font-family: 'KaiTi', '楷体', serif;
+                                    background: linear-gradient(270deg, red, orange, yellow, green, cyan, blue, purple, red);
+                                    background-size: 1000% 100%;
+                                    -webkit-background-clip: text;
+                                    -webkit-text-fill-color: transparent;
+                                    animation: rainbowText 8s linear infinite;
+                                  ">请说小元来唤醒我</h1>
                             </div>
                             <div class="chat-container">
                                 <div class="chat-messages" id="chatMessages"></div>
-                                <div class="chat-input">
+                                <div class="chat-input" style="display: none">
                                     <input type="text" id="chatInput" placeholder="输入消息...">
                                     <button id="sendBtn">发送</button>
                                 </div>
@@ -560,8 +628,11 @@
                 //获取麦克风
                 var markBtn = document.getElementById("mark");
                 if (markBtn) markBtn.click();
+                //$('#fullscreen-btn').click
+
               }, 4000); // 4 秒后触发
             });
+
    </script>
     <script>
         const visualizerContainer = document.getElementById('visualizer');
@@ -614,7 +685,7 @@
                     $('#visualizer').hide();
                 } else {
                     addChatMessage(data.text, 'system');  // 使用你已有的函数显示到右侧聊天框
-                    sendMessage(data.text);  // 发送到视频流
+                    sendMessage(data.text,'user');  // 发送到视频流
                         //调用human
                         fetch('/human', {
                             body: JSON.stringify({
@@ -634,8 +705,13 @@
                         if (json.code === 0) {
                             // 解码返回的 Unicode 字符串
                             const decodedText = json.data;
-                            console.log('消息发送成功，返回内容：', decodedText);
-                            addChatMessage( decodedText, 'system');
+                            if (decodedText){
+                                 console.log('消息发送成功，返回内容：', decodedText);
+                                 if(! decodedText.includes("你好呀")){
+                                     addChatMessage( decodedText, 'system');
+                                     sendMessage(decodedText, 'system');  // 发送到视频流
+                                 }
+                            }
                         } else {
                             console.error('接口返回错误：', json);
                         }
@@ -655,13 +731,18 @@
             const chatMessages = document.getElementById('chatMessages');
 
             // 发送消息功能
-            function sendMessage(message) {
+            function sendMessage(message, type = 'user') {
                 if (message) {
                     // 创建消息元素
                     const messageDiv = document.createElement('div');
                     messageDiv.className = 'message';
                     messageDiv.textContent = message;
-
+                    //根据不同的角色将字体颜色进行更改
+                    if (type === 'user') {
+                        messageDiv.classList.add('user-left-message');
+                    } else {
+                        messageDiv.classList.add('system-left-message');
+                    }
                     // 添加消息到聊天框
                     chatMessages.appendChild(messageDiv);
 

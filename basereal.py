@@ -152,11 +152,13 @@ class BaseReal:
             #获取当前帧
             mirror_index = redis_manager.get_current_frame("mirror_index")
             mirror_turn = redis_manager.get_current_frame("mirror_turn")
-            if mirror_index < 300:
+            # 变更视频需要改动的地方
+            if mirror_index < 290:
                 redis_manager.delete_max_cache_size(num)
             else:
                 # 定义目标帧列表和阈值
-                target_frames = [300, 415, 540, 620, 750]
+                # 变更视频需要改动的地方
+                target_frames = [290, 415, 540, 630, 730]
                 threshold = 50  # 允许的帧偏差范围
 
                 # 初始化最接近的目标帧
@@ -172,20 +174,33 @@ class BaseReal:
                 print('[INFO] chosen_target:', chosen_target)
                 if mirror_turn > 0:
                     #正向循环
-                    redis_manager.set_current_frame("current_frame", mirror_index - 1)
                     # 根据最接近的目标帧更新当前帧
                     if chosen_target is not None:
                         num = mirror_index - chosen_target
-                        print(f'[INFO] notify end, mirror_index={mirror_index}, mirror_turn={mirror_turn}, num={num}')
-                        num = num // 25
+                        if num > 0 :
+                            redis_manager.set_current_frame("current_frame", mirror_index - 1)
+                            print(f'[INFO] notify end, mirror_index={mirror_index}, mirror_turn={mirror_turn}, num={num}')
+                            num = num // 25
+                        else:
+                            redis_manager.set_current_frame("current_frame", mirror_index + 1)
+                            num = 0 - num
+                            print(f'[INFO] notify end, mirror_index={mirror_index}, mirror_turn={mirror_turn}, num={num}')
+                            num = num // 25
                 else:
                     #反向循环
-                    redis_manager.set_current_frame("current_frame", mirror_index + 1)
+
                     # 根据最接近的目标帧更新当前帧
                     if chosen_target is not None:
                         num = chosen_target - mirror_index
-                        print(f'[INFO] notify end, mirror_index={mirror_index}, mirror_turn={mirror_turn}, num={num}')
-                        num = num // 25
+                        if num > 0 :
+                            redis_manager.set_current_frame("current_frame", mirror_index + 1)
+                            print(f'[INFO] notify end, mirror_index={mirror_index}, mirror_turn={mirror_turn}, num={num}')
+                            num = num // 25
+                        else:
+                            redis_manager.set_current_frame("current_frame", mirror_index - 1)
+                            num = 0 - num
+                            print(f'[INFO] notify end, mirror_index={mirror_index}, mirror_turn={mirror_turn}, num={num}')
+                            num = num // 25
                 print(f'[INFO] notify end, mirror_index={mirror_index}, mirror_turn={mirror_turn}, num={num}')
                 redis_manager.delete_max_cache_size(num)
 

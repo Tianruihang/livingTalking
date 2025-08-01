@@ -152,7 +152,8 @@ async def human(request):
             print("text内容是：", res)
         except json.JSONDecodeError:
             print("result_msg 不是合法的 JSON 格式")
-        redis_manager.set_max_cache_size(770)
+        # 变更视频需要改动的地方
+        redis_manager.set_max_cache_size(760)
         redis_manager.set_current_frame("current_frame",100)
     return web.Response(
         content_type="application/json",

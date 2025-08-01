@@ -136,7 +136,8 @@ def inference(quit_event,batch_size,face_list_cycle,audio_feat_queue,audio_out_q
             
         is_all_silence=True
         audio_frames = []
-        length = 300
+        #变更视频需要改动的地方
+        length = 290
         if redis_manager.has_max_cache_size()  != 0:
             result = redis_manager.has_max_cache_size()
             #转int

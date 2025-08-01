@@ -67,8 +67,12 @@ class RedisManager:
         self.redis.setex("max_cache_size",60, size)
    #删除最大数量
     def delete_max_cache_size(self,timeout=60):
-        #直接删除key
-        self.redis.setex("max_cache_size",timeout, 770)
+        if timeout == 0 :
+            #直接删除key
+            self.redis.delete("max_cache_size")
+        else:
+            # 变更视频需要改动的地方
+            self.redis.setex("max_cache_size",timeout, 760)
     #判断是否存在最大数量
     def has_max_cache_size(self):
         """判断是否存在最大数量"""

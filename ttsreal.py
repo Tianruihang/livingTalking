@@ -102,7 +102,7 @@ class EdgeTTS(BaseTTS):
         asyncio.new_event_loop().run_until_complete(self.__main(voicename,text))
         logger.info(f'-------edge tts time:{time.time()-t:.4f}s')
         if self.input_stream.getbuffer().nbytes<=0: #edgetts err
-            logger.error('edgetts err!!!!!')
+            logger.error('edgetts err!!!!! input_stream is empty')
             return
         
         self.input_stream.seek(0)
