@@ -203,6 +203,8 @@ class BaseReal:
                             num = num // 25
                 print(f'[INFO] notify end, mirror_index={mirror_index}, mirror_turn={mirror_turn}, num={num}')
                 redis_manager.delete_max_cache_size(num)
+                #延长8s等待,可以继续提问
+                redis_manager.set_key_time_value("ceyan:questionWaiting:python", 8, 5)
 
     def start_recording(self):
         """开始录制视频"""

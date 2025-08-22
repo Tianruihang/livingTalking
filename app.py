@@ -1,20 +1,3 @@
-###############################################################################
-#  Copyright (C) 2024 LiveTalking@lipku https://github.com/lipku/LiveTalking
-#  email: lipku@foxmail.com
-# 
-#  Licensed under the Apache License, Version 2.0 (the "License");
-#  you may not use this file except in compliance with the License.
-#  You may obtain a copy of the License at
-#  
-#       http://www.apache.org/licenses/LICENSE-2.0
-# 
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-#  limitations under the License.
-###############################################################################
-
 # server.py
 from flask import Flask, render_template,send_from_directory,request, jsonify
 from flask_sockets import Sockets
@@ -50,6 +33,8 @@ from redis_global import redis_manager
 app = Flask(__name__)
 #sockets = Sockets(app)
 nerfreals:Dict[int, BaseReal] = {} #sessionid:BaseReal
+# 记录每个 sessionid 对应的 RTCPeerConnection 数量，用于安全回收资源
+session_pc_counts:Dict[int, int] = {}
 opt = None
 model = None
 avatar = None
@@ -85,17 +70,33 @@ async def offer(request):
     params = await request.json()
     offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
 
-    if len(nerfreals) >= opt.max_session:
-        logger.info('reach max session')
-        return -1
-    sessionid = randN(6) #len(nerfreals)
-    logger.info('sessionid=%d',sessionid)
-    nerfreals[sessionid] = None
-    nerfreal = await asyncio.get_event_loop().run_in_executor(None, build_nerfreal,sessionid)
-    nerfreals[sessionid] = nerfreal
+    # 支持切换时复用已有 session，避免触发会话上限
+    reuse_sessionid = params.get("sessionid")
+    sessionid = None
+
+    if reuse_sessionid is not None and isinstance(reuse_sessionid, int) and reuse_sessionid in nerfreals:
+        sessionid = reuse_sessionid
+        logger.info('reuse sessionid=%d for handoff', sessionid)
+    else:
+        # 新建会话前检查上限
+        if len(nerfreals) >= opt.max_session:
+            logger.info('reach max session')
+            return web.Response(
+                status=429,
+                content_type="application/json",
+                text=json.dumps({"code": -1, "msg": "reach max session"})
+            )
+        sessionid = randN(6)
+        logger.info('sessionid=%d', sessionid)
+        nerfreals[sessionid] = None
+        nerfreal = await asyncio.get_event_loop().run_in_executor(None, build_nerfreal, sessionid)
+        nerfreals[sessionid] = nerfreal
     
     pc = RTCPeerConnection()
     pcs.add(pc)
+
+    # 增加该 session 的 RTCPeerConnection 引用计数
+    session_pc_counts[sessionid] = session_pc_counts.get(sessionid, 0) + 1
 
     @pc.on("connectionstatechange")
     async def on_connectionstatechange():
@@ -103,10 +104,37 @@ async def offer(request):
         if pc.connectionState == "failed":
             await pc.close()
             pcs.discard(pc)
-            del nerfreals[sessionid]
+            # 关闭时减少引用计数，计数为0再释放资源
+            session_pc_counts[sessionid] = session_pc_counts.get(sessionid, 1) - 1
+            if session_pc_counts[sessionid] <= 0:
+                nerfreals.pop(sessionid, None)
+                session_pc_counts.pop(sessionid, None)
         if pc.connectionState == "closed":
             pcs.discard(pc)
-            del nerfreals[sessionid]
+            session_pc_counts[sessionid] = session_pc_counts.get(sessionid, 1) - 1
+            if session_pc_counts[sessionid] <= 0:
+                nerfreals.pop(sessionid, None)
+                session_pc_counts.pop(sessionid, None)
+
+    # 检查 sessionid 是否存在
+    if sessionid not in nerfreals:
+        logger.error(f"Session {sessionid} not found in offer function")
+        # 清理 RTCPeerConnection，避免资源占用
+        try:
+            await pc.close()
+        except Exception:
+            pass
+        pcs.discard(pc)
+        # 回收计数
+        session_pc_counts[sessionid] = session_pc_counts.get(sessionid, 1) - 1
+        if session_pc_counts.get(sessionid, 0) <= 0:
+            session_pc_counts.pop(sessionid, None)
+            nerfreals.pop(sessionid, None)
+        return web.Response(
+            status=500,
+            content_type="application/json",
+            text=json.dumps({"code": -1, "msg": "Session creation failed"})
+        )
 
     player = HumanPlayer(nerfreals[sessionid])
     audio_sender = pc.addTrack(player.audio)
@@ -117,55 +145,197 @@ async def offer(request):
     preferences += list(filter(lambda x: x.name == "rtx", capabilities.codecs))
     transceiver = pc.getTransceivers()[1]
     transceiver.setCodecPreferences(preferences)
+    logger.info(f'Codec preferences set: {[c.name for c in preferences]}')
+
+    # 检测客户端是否为安卓设备并优化配置
+    user_agent = request.headers.get('User-Agent', '')
+    is_android = 'Android' in user_agent
+    logger.info(f'Client User-Agent: {user_agent}, Android: {is_android}')
+
+    # Limit video to a stable bitrate/framerate to avoid sharp oscillation on constrained devices
+    try:
+        params = video_sender.getParameters()
+        if not getattr(params, "encodings", None):
+            # Ensure at least one encoding exists
+            params.encodings = [{}]
+        for enc in params.encodings:
+            if is_android:
+                # 安卓设备使用更保守的编码参数
+                enc["maxBitrate"] = 2_000_000  # 2 Mbps cap for Android
+                enc["maxFramerate"] = 24       # 24 fps for Android
+                enc["scaleResolutionDownBy"] = 1.0  # 禁止分辨率缩放
+                enc["minBitrate"] = 500_000    # 500 kbps floor for Android
+                logger.info('Applied Android-optimized video encoding parameters')
+            else:
+                # 桌面设备使用标准参数
+                enc["maxBitrate"] = 6_000_000  # 6 Mbps cap
+                enc["maxFramerate"] = 30       # allow 30 fps
+                enc["scaleResolutionDownBy"] = 1.0  # 禁止分辨率缩放
+                enc["minBitrate"] = 1_500_000  # 1.5 Mbps floor
+        # aiortc.setParameters might be sync depending on version
+        maybe = video_sender.setParameters(params)
+        if hasattr(maybe, "__await__"):
+            await maybe
+    except Exception as e:
+        logger.warning(f"setParameters for video_sender failed: {e}")
 
     await pc.setRemoteDescription(offer)
 
     answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
 
-    #return jsonify({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type})
+    # ---- SDP bandwidth hints injection (harmless for aiortc; helps receivers ramp up) ----
+    def inject_sdp_bandwidth_hints(sdp: str) -> str:
+        try:
+            lines = sdp.split('\r\n')
+            # map pt -> codec
+            pt_to_codec = {}
+            for line in lines:
+                m = re.match(r"^a=rtpmap:(\d+)\\s+([A-Za-z0-9]+)", line)
+                if m:
+                    pt_to_codec[m.group(1)] = m.group(2).upper()
 
+            # find video media section boundaries
+            idx_m = None
+            for i, line in enumerate(lines):
+                if line.startswith('m=video '):
+                    idx_m = i
+                    break
+            if idx_m is None:
+                return sdp
+            idx_end = len(lines)
+            for i in range(idx_m+1, len(lines)):
+                if lines[i].startswith('m='):
+                    idx_end = i
+                    break
+
+            # ensure b=TIAS in video section
+            has_b = False
+            for i in range(idx_m+1, idx_end):
+                if lines[i].startswith('b=TIAS:') or lines[i].startswith('b=AS:'):
+                    # 根据设备类型设置不同的带宽
+                    bandwidth = '5000000' if is_android else '6000000'  # 2Mbps for Android, 6Mbps for others
+                    lines[i] = f'b=TIAS:{bandwidth}'
+                    has_b = True
+                    break
+            if not has_b:
+                # insert after c= if exists, else right after m=
+                insert_at = idx_m + 1
+                for i in range(idx_m+1, idx_end):
+                    if lines[i].startswith('c='):
+                        insert_at = i + 1
+                        break
+                bandwidth = '5000000' if is_android else '6000000'
+                lines.insert(insert_at, f'b=TIAS:{bandwidth}')
+                idx_end += 1
+
+            # add x-google-* for VP8 payload types
+            # find all fmtp lines and extend; if none, create
+            vp8_pts = [pt for pt, codec in pt_to_codec.items() if codec == 'VP8']
+            if vp8_pts:
+                for pt in vp8_pts:
+                    found = False
+                    for i in range(idx_m+1, idx_end):
+                        if lines[i].startswith(f'a=fmtp:{pt} '):
+                            if 'x-google-start-bitrate' not in lines[i]:
+                                # 根据设备类型设置不同的VP8参数
+                                if is_android:
+                                    lines[i] += ';x-google-start-bitrate=1000;x-google-min-bitrate=500;x-google-max-bitrate=2000'
+                                else:
+                                    lines[i] += ';x-google-start-bitrate=3000;x-google-min-bitrate=1500;x-google-max-bitrate=6000'
+                            found = True
+                            break
+                    if not found:
+                        # insert a new fmtp near rtpmap
+                        insert_idx = idx_end
+                        for i in range(idx_m+1, idx_end):
+                            if lines[i].startswith(f'a=rtpmap:{pt} '):
+                                insert_idx = i + 1
+                        if is_android:
+                            lines.insert(insert_idx, f'a=fmtp:{pt} x-google-start-bitrate=1000;x-google-min-bitrate=500;x-google-max-bitrate=2000')
+                        else:
+                            lines.insert(insert_idx, f'a=fmtp:{pt} x-google-start-bitrate=3000;x-google-min-bitrate=1500;x-google-max-bitrate=6000')
+                        idx_end += 1
+
+            return '\r\n'.join(lines)
+        except Exception as e:
+            logger.warning(f"SDP injection failed: {e}")
+            return sdp
+
+    final_sdp = inject_sdp_bandwidth_hints(pc.localDescription.sdp)
+
+    #return jsonify({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type})
+   
     return web.Response(
         content_type="application/json",
         text=json.dumps(
-            {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type, "sessionid":sessionid}
+            {"sdp": final_sdp, "type": pc.localDescription.type, "sessionid":sessionid}
         ),
     )
 
 async def human(request):
-    params = await request.json()
+    try:
+        params = await request.json()
 
-    sessionid = params.get('sessionid',0)
-    if params.get('interrupt'):
-        nerfreals[sessionid].flush_talk()
-    if params['type']=='echo':
-        nerfreals[sessionid].put_msg_txt(params['text'])
-    elif params['type']=='chat':
-        #====================替换大模型==================
-        await asyncio.get_event_loop().run_in_executor(None, llm_java_wenda_response, params['text'],nerfreals[sessionid])
-        #nerfreals[sessionid].put_msg_txt(res)
-        result_msg = nerfreals[sessionid].get_result_msg()
-        # 检查是否为 None 或非字符串类型
-        try:
-            msg_dict = json.loads(result_msg)
-            res = msg_dict.get("text", "")
-            print("text内容是：", res)
-        except json.JSONDecodeError:
-            print("result_msg 不是合法的 JSON 格式")
-        # 变更视频需要改动的地方
-        redis_manager.set_max_cache_size(760)
-        redis_manager.set_current_frame("current_frame",100)
-    return web.Response(
-        content_type="application/json",
-        text=json.dumps(
-            {"code": 0, "data": res if 'res' in locals() else "ok"}
-        ),
-    )
+        sessionid = params.get('sessionid',0)
+        
+        # 检查 sessionid 是否存在
+        if sessionid not in nerfreals:
+            return web.Response(
+                content_type="application/json",
+                text=json.dumps(
+                    {"code": -1, "msg": "Session not found", "data": "Session ID does not exist"}
+                ),
+            )
+        
+        if params.get('interrupt'):
+            nerfreals[sessionid].flush_talk()
+        if params['type']=='echo':
+            nerfreals[sessionid].put_msg_txt(params['text'])
+        elif params['type']=='chat':
+            #====================替换大模型==================
+            await asyncio.get_event_loop().run_in_executor(None, llm_java_wenda_response, params['text'],nerfreals[sessionid])
+            #nerfreals[sessionid].put_msg_txt(res)
+            result_msg = nerfreals[sessionid].get_result_msg()
+            # 检查是否为 None 或非字符串类型
+            try:
+                msg_dict = json.loads(result_msg)
+                res = msg_dict.get("text", "")
+                print("text内容是：", res)
+            except json.JSONDecodeError:
+                print("result_msg 不是合法的 JSON 格式")
+            # 变更视频需要改动的地方
+            redis_manager.set_max_cache_size(760)
+            redis_manager.set_current_frame("current_frame",100)
+        return web.Response(
+            content_type="application/json",
+            text=json.dumps(
+                {"code": 0, "data": res if 'res' in locals() else "ok"}
+            ),
+        )
+    except Exception as e:
+        logger.error(f"Error in human function: {e}")
+        return web.Response(
+            content_type="application/json",
+            text=json.dumps(
+                {"code": -1, "msg": "Internal error", "data": str(e)}
+            ),
+        )
 
 async def humanaudio(request):
     try:
         form= await request.post()
         sessionid = int(form.get('sessionid',0))
+        
+        # 检查 sessionid 是否存在
+        if sessionid not in nerfreals:
+            return web.Response(
+                content_type="application/json",
+                text=json.dumps(
+                    {"code": -1, "msg": "Session not found", "data": "Session ID does not exist"}
+                ),
+            )
+        
         fileobj = form["file"]
         filename=fileobj.filename
         filebytes=fileobj.file.read()
@@ -178,52 +348,110 @@ async def humanaudio(request):
             ),
         )
     except Exception as e:
+        logger.error(f"Error in humanaudio function: {e}")
         return web.Response(
             content_type="application/json",
             text=json.dumps(
-                {"code": -1, "msg":"err","data": ""+e.args[0]+""}
+                {"code": -1, "msg":"err","data": str(e)}
             ),
         )
 
 async def set_audiotype(request):
-    params = await request.json()
+    try:
+        params = await request.json()
 
-    sessionid = params.get('sessionid',0)    
-    nerfreals[sessionid].set_custom_state(params['audiotype'],params['reinit'])
+        sessionid = params.get('sessionid',0)
+        
+        # 检查 sessionid 是否存在
+        if sessionid not in nerfreals:
+            return web.Response(
+                content_type="application/json",
+                text=json.dumps(
+                    {"code": -1, "msg": "Session not found", "data": "Session ID does not exist"}
+                ),
+            )
+        
+        nerfreals[sessionid].set_custom_state(params['audiotype'],params['reinit'])
 
-    return web.Response(
-        content_type="application/json",
-        text=json.dumps(
-            {"code": 0, "data":"ok"}
-        ),
-    )
+        return web.Response(
+            content_type="application/json",
+            text=json.dumps(
+                {"code": 0, "data":"ok"}
+            ),
+        )
+    except Exception as e:
+        logger.error(f"Error in set_audiotype function: {e}")
+        return web.Response(
+            content_type="application/json",
+            text=json.dumps(
+                {"code": -1, "msg": "Internal error", "data": str(e)}
+            ),
+        )
 
 async def record(request):
-    params = await request.json()
+    try:
+        params = await request.json()
 
-    sessionid = params.get('sessionid',0)
-    if params['type']=='start_record':
-        # nerfreals[sessionid].put_msg_txt(params['text'])
-        nerfreals[sessionid].start_recording()
-    elif params['type']=='end_record':
-        nerfreals[sessionid].stop_recording()
-    return web.Response(
-        content_type="application/json",
-        text=json.dumps(
-            {"code": 0, "data":"ok"}
-        ),
-    )
+        sessionid = params.get('sessionid',0)
+        
+        # 检查 sessionid 是否存在
+        if sessionid not in nerfreals:
+            return web.Response(
+                content_type="application/json",
+                text=json.dumps(
+                    {"code": -1, "msg": "Session not found", "data": "Session ID does not exist"}
+                ),
+            )
+        
+        if params['type']=='start_record':
+            # nerfreals[sessionid].put_msg_txt(params['text'])
+            nerfreals[sessionid].start_recording()
+        elif params['type']=='end_record':
+            nerfreals[sessionid].stop_recording()
+        return web.Response(
+            content_type="application/json",
+            text=json.dumps(
+                {"code": 0, "data":"ok"}
+            ),
+        )
+    except Exception as e:
+        logger.error(f"Error in record function: {e}")
+        return web.Response(
+            content_type="application/json",
+            text=json.dumps(
+                {"code": -1, "msg": "Internal error", "data": str(e)}
+            ),
+        )
 
 async def is_speaking(request):
-    params = await request.json()
+    try:
+        params = await request.json()
 
-    sessionid = params.get('sessionid',0)
-    return web.Response(
-        content_type="application/json",
-        text=json.dumps(
-            {"code": 0, "data": nerfreals[sessionid].is_speaking()}
-        ),
-    )
+        sessionid = params.get('sessionid',0)
+        
+        # 检查 sessionid 是否存在
+        if sessionid not in nerfreals:
+            return web.Response(
+                content_type="application/json",
+                text=json.dumps(
+                    {"code": -1, "msg": "Session not found", "data": "Session ID does not exist"}
+                ),
+            )
+        
+        return web.Response(
+            content_type="application/json",
+            text=json.dumps(
+                {"code": 0, "data": nerfreals[sessionid].is_speaking()}
+            ),
+        )
+    except Exception as e:
+        logger.error(f"Error in is_speaking function: {e}")
+        return web.Response(
+            content_type="application/json",
+            text=json.dumps(
+                {"code": -1, "msg": "Internal error", "data": str(e)}
+            ),
+        )
 
 
 async def on_shutdown(app):
@@ -241,33 +469,52 @@ async def post(url,data):
         logger.info(f'Error: {e}')
 
 async def run(push_url,sessionid):
-    nerfreal = await asyncio.get_event_loop().run_in_executor(None, build_nerfreal,sessionid)
-    nerfreals[sessionid] = nerfreal
+    try:
+        nerfreal = await asyncio.get_event_loop().run_in_executor(None, build_nerfreal,sessionid)
+        nerfreals[sessionid] = nerfreal
 
-    pc = RTCPeerConnection()
-    pcs.add(pc)
+        pc = RTCPeerConnection()
+        pcs.add(pc)
 
-    @pc.on("connectionstatechange")
-    async def on_connectionstatechange():
-        logger.info("Connection state is %s" % pc.connectionState)
-        if pc.connectionState == "failed":
-            await pc.close()
+        @pc.on("connectionstatechange")
+        async def on_connectionstatechange():
+            logger.info("Connection state is %s" % pc.connectionState)
+            if pc.connectionState == "failed":
+                await pc.close()
+                pcs.discard(pc)
+
+        # 检查 sessionid 是否存在
+        if sessionid not in nerfreals:
+            logger.error(f"Session {sessionid} not found in run function")
+            try:
+                await pc.close()
+            except Exception:
+                pass
             pcs.discard(pc)
+            return
 
-    player = HumanPlayer(nerfreals[sessionid])
-    audio_sender = pc.addTrack(player.audio)
-    video_sender = pc.addTrack(player.video)
+        player = HumanPlayer(nerfreals[sessionid])
+        audio_sender = pc.addTrack(player.audio)
+        video_sender = pc.addTrack(player.video)
 
-    await pc.setLocalDescription(await pc.createOffer())
-    answer = await post(push_url,pc.localDescription.sdp)
-    await pc.setRemoteDescription(RTCSessionDescription(sdp=answer,type='answer'))
+        await pc.setLocalDescription(await pc.createOffer())
+        answer = await post(push_url,pc.localDescription.sdp)
+        await pc.setRemoteDescription(RTCSessionDescription(sdp=answer,type='answer'))
+    except Exception as e:
+        logger.error(f"Error in run function for session {sessionid}: {e}")
+        # 清理资源
+        if sessionid in nerfreals:
+            nerfreals.pop(sessionid, None)
+
+
+
 ##########################################
 # os.environ['MKL_SERVICE_FORCE_INTEL'] = '1'
-# os.environ['MULTIPROCESSING_METHOD'] = 'forkserver'                                                    
+# os.environ['MULTIPROCESSING_METHOD'] = 'forkserver'
 if __name__ == '__main__':
     mp.set_start_method('spawn')
     parser = argparse.ArgumentParser()
-    
+
     # audio FPS
     parser.add_argument('--fps', type=int, default=50, help="audio fps,must be 50")
     # sliding window left-middle-right length (unit: 20ms)

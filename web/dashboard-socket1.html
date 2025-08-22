@@ -85,12 +85,29 @@
         }
         #video, #video-buffer {
             position: absolute;
-            left: -99999px;
-            top: auto;
-            width: 1px;
-            height: 1px;
-            opacity: 0;
-            pointer-events: none;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: -1;
+            /* 安卓设备特殊处理 - 确保视频元素能正常播放 */
+        }
+        
+        /* 安卓设备特殊处理 - 确保视频元素能正常播放 */
+        @media screen and (max-width: 768px) {
+            #video, #video-buffer {
+                /* 使用绝对定位隐藏而不是display:none，确保视频能正常播放 */
+                position: absolute;
+                top: -9999px;
+                left: -9999px;
+                width: 1px;
+                height: 1px;
+                opacity: 0;
+                pointer-events: none;
+                /* 确保视频元素仍然可以播放 */
+                visibility: hidden;
+            }
         }
 
         .controls-container {
@@ -517,8 +534,8 @@
                         </div>
                         <div class="video-container">
                             <canvas id="video-canvas"></canvas>
-                            <video id="video" autoplay playsinline disablePictureInPicture ></video>
-                            <video id="video-buffer" autoplay playsinline disablePictureInPicture ></video>
+                            <video id="video" autoplay playsinline muted disablePictureInPicture webkit-playsinline x5-playsinline x5-video-player-type="h5" x5-video-player-fullscreen="true" style="display: none;"></video>
+                            <video id="video-buffer" autoplay playsinline muted disablePictureInPicture webkit-playsinline x5-playsinline x5-video-player-type="h5" x5-video-player-fullscreen="true" style="display: none;"></video>
                             <button id="fullscreen-btn" class="btn btn-sm btn-outline-light position-absolute" style="top: 15px; left: 15px; z-index: 10;">
                                 <i class="bi bi-arrows-fullscreen"></i>
                             </button>
@@ -573,7 +590,7 @@
 
                                     </div>
                             </div>
-                            <div class="chat-container">
+                            <div class="chat-container" style="display: none">
                                 <div class="chat-messages" id="chatMessages"></div>
                                 <div class="chat-input" style="display: none">
                                     <input type="text" id="chatInput" placeholder="输入消息...">
@@ -629,6 +646,10 @@
                                         <div class="form-check form-switch mb-3">
                                             <input class="form-check-input" type="checkbox" id="use-stun">
                                             <label class="form-check-label" for="use-stun">使用STUN服务器</label>
+                                        </div>
+                                        <div class="form-check form-switch mb-3">
+                                            <input class="form-check-input" type="checkbox" id="debug-mode">
+                                            <label class="form-check-label" for="debug-mode">调试模式（显示视频元素）</label>
                                         </div>
                                     </div>
                                 </div>
@@ -705,6 +726,7 @@
     <input type="hidden" id="sessionid" value="0">
 
     <script src="connection-manager-config.js"></script>
+    <script src="android-compat.js"></script>
     <script src="client.js"></script>
     <script src="srs.sdk.js"></script>
     <script src="bootstrap.bundle.min.js"></script>
@@ -755,9 +777,62 @@
                                 compatInfo.innerHTML += ' <span class="text-danger">(WebRTC不支持)</span>';
                             }
                         }
+                        
+                        // 安卓设备特殊处理
+                        if (isAndroid) {
+                            console.log('[Android] Applying special optimizations...');
+                            
+                            // 强制设置视频元素属性
+                            var videos = document.querySelectorAll('video');
+                            videos.forEach(function(video) {
+                                video.setAttribute('webkit-playsinline', 'true');
+                                video.setAttribute('x5-playsinline', 'true');
+                                video.setAttribute('x5-video-player-type', 'h5');
+                                video.setAttribute('x5-video-player-fullscreen', 'true');
+                                video.muted = false; // 取消静音以播放音频
+                                video.playsInline = true;
+                            });
+                            
+                            // 优化Canvas渲染
+                            var canvas = document.getElementById('video-canvas');
+                            if (canvas) {
+                                canvas.style.transform = 'translateZ(0)'; // 启用硬件加速
+                                canvas.style.backfaceVisibility = 'hidden';
+                            }
+                            
+                        }
                     }
                 } catch(e) {
                     console.warn('兼容性检测失败:', e);
+                }
+                
+                // 添加调试模式切换监听器
+                var debugModeCheckbox = document.getElementById('debug-mode');
+                if (debugModeCheckbox) {
+                    debugModeCheckbox.addEventListener('change', function() {
+                        var video = document.getElementById('video');
+                        var canvas = document.getElementById('video-canvas');
+                        
+                        if (this.checked) {
+                            // 启用调试模式：显示视频元素
+                            if (canvas) canvas.style.display = 'none';
+                            if (video) {
+                                video.style.display = 'block';
+                                video.style.position = 'absolute';
+                                video.style.top = '0';
+                                video.style.left = '0';
+                                video.style.width = '100%';
+                                video.style.height = '100%';
+                                video.style.zIndex = '1';
+                            }
+                            console.log('[Debug] Video element mode enabled');
+                        } else {
+                            // 关闭调试模式：显示Canvas
+                            if (video) video.style.display = 'none';
+                            if (canvas) canvas.style.display = 'block';
+                            console.log('[Debug] Canvas mode enabled');
+                        }
+                    });
                 }
                 
                 var btn = document.getElementById("start");

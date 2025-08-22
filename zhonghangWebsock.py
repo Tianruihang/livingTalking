@@ -1,5 +1,6 @@
 # ✅ 必须放最前面
 import eventlet
+from anyio import sleep
 
 from redis_global import redis_manager
 
@@ -43,6 +44,8 @@ def push_data():
         feature_recorded = redis_manager.get_current_frame(REDIS_WAITING_KEYS)
         print(f'feature_recorded: {feature_recorded}')
         if feature_recorded != 0:
+            #等待2s
+            sleep(2)
             socketio.emit('message', {'text': f'开始可视化'})
         else:
             socketio.emit('message', {'text': f'停止可视化'})

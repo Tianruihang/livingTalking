@@ -325,6 +325,25 @@
         .recording-pulse {
             animation: pulse 1.5s infinite;
         }
+        /*改动*/
+        .top-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 30vw;
+            padding-left: 10px;
+
+            /* 改动*/
+            background-color: #222222cc; /* 更兼容的透明色写法 */
+            box-shadow: none; /* 先去掉测试看看闪动是否还在 */
+            border-radius: 8px;
+            /*backdrop-filter: blur(5px);*/
+            color: white;
+            z-index: 999;
+            display: flex;
+            flex-direction: column;
+              backface-visibility: hidden; /* 有时可以避免闪动 */
+        }
 
         /* 在原有样式表中添加以下样式 */
         .chat-container {
@@ -333,14 +352,16 @@
             left: 20px;
             width: 30vw;
             height: 50vh;
-            background: rgba(0, 0, 0, 0.2);
+            /* 改动*/
+            background-color: #222222cc; /* 更兼容的透明色写法 */
+            box-shadow: none; /* 先去掉测试看看闪动是否还在 */
             border-radius: 8px;
-            backdrop-filter: blur(5px);
+            /*backdrop-filter: blur(5px);*/
             color: black;
             z-index: 999;
             display: flex;
             flex-direction: column;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+              backface-visibility: hidden; /* 有时可以避免闪动 */
         }
 
           .chat-messages {
@@ -348,6 +369,8 @@
             padding: 12px;
             overflow-y: auto;
             word-break: break-word;
+             will-change: transform;
+             -webkit-overflow-scrolling: touch; /* 安卓滚动优化 */
         }
 
         .chat-input {
@@ -485,6 +508,39 @@
                                     animation: rainbowText 8s linear infinite;
                                   ">请说小元来唤醒我</h1>
                             </div>
+                            <div class="top-container">
+                                    <h1 class="title">办理业务请说</h1>
+                                    <div class="business-grid">
+                                        <div class="business-card">
+                                            <h2>个人业务</h2>
+                                            <p>大额存单 | 个人钱包 | 贷款产品 | 消费贷产品 | 信用卡申请 | 存款证明</p>
+                                        </div>
+                                        <div class="business-card">
+                                            <h2>产品业务</h2>
+                                            <p>数字人民币钱包 | 对公钱包 | 收费标准</p>
+                                        </div>
+                                        <div class="business-card">
+                                            <h2>单位业务</h2>
+                                            <p>单位定期存款 | 通知存款 | 协定存款</p>
+                                        </div>
+                                        <div class="business-card">
+                                            <h2>贷款业务</h2>
+                                            <p>二类账户贷款 | 偿还贷款 | 偿还信用卡</p>
+                                        </div>
+                                        <div class="business-card">
+                                            <h2>其他业务</h2>
+                                            <p>企业年金 | 数字人民币 | 银企对账 | 贵金属积存</p>
+                                        </div>
+                                        <div class="business-card">
+                                            <h2>随心智贷</h2>
+                                            <p>办理方式 | 贷款期限 | 额度金额 | 自动还款日</p>
+                                        </div>
+                                        <div class="business-card">
+                                            <h2>中银易贷</h2>
+                                            <p>贷款主体 | 计息方式 | 利率</p>
+                                        </div>
+                                    </div>
+                            </div>
                             <div class="chat-container">
                                 <div class="chat-messages" id="chatMessages"></div>
                                 <div class="chat-input" style="display: none">
@@ -582,6 +638,7 @@
                                 </form>
                                 
                                 <!-- 按住说话按钮 -->
+
                                 <div class="voice-record-btn" id="voice-record-btn">
                                     <i class="bi bi-mic-fill"></i>
                                 </div>
@@ -678,7 +735,7 @@
             socket.on('message', (data) => {
                 // 判断是否显示visualizer-container
                 if (data.text === '开始可视化') {
-                    console.log('开始可视化');
+                    //console.log('开始可视化');
                     $('#visualizer').show();
                 } else if (data.text === '停止可视化') {
                     console.log('停止可视化');
@@ -701,7 +758,6 @@
                     })
                     .then(res => res.json())  // 解析为 JSON
                     .then(json => {
-                        console.log('res json:', json);
                         if (json.code === 0) {
                             // 解码返回的 Unicode 字符串
                             const decodedText = json.data;
@@ -730,28 +786,101 @@
             const sendBtn = document.getElementById('sendBtn');
             const chatMessages = document.getElementById('chatMessages');
 
+            // 最多保留 3 组对话（用户+系统）
+            const MAX_GROUPS = 3;
+            // 内存中存储对话组，每组形如 { user: "...", system: "..." }
+            let conversations = [];
+
+            // 添加对话组
+            function addConversation(userMessage, systemMessage) {
+                if (!userMessage && !systemMessage) return;
+
+                // 添加新组
+                conversations.push({
+                    user: userMessage || '',
+                    system: systemMessage || ''
+                });
+
+                // 超过最大组数时，删除最早的一组
+                if (conversations.length > MAX_GROUPS) {
+                    conversations.shift();
+                }
+
+                // 重新渲染
+                renderConversations();
+            }
+
+            // 渲染聊天内容
+            function renderConversations() {
+                // 清空 DOM
+                chatMessages.innerHTML = '';
+
+                // 一次性渲染所有组
+                conversations.forEach(conv => {
+                    // 用户消息
+                    if (conv.user) {
+                        const userDiv = document.createElement('div');
+                        userDiv.className = 'message user-left-message';
+                        userDiv.textContent = conv.user;
+                        chatMessages.appendChild(userDiv);
+                    }
+                    // 系统消息
+                    if (conv.system) {
+                        const sysDiv = document.createElement('div');
+                        sysDiv.className = 'message system-left-message';
+                        sysDiv.textContent = conv.system;
+                        chatMessages.appendChild(sysDiv);
+                    }
+                });
+
+                // 滚动到底部（避免安卓动画渲染卡顿，直接赋值）
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+
             // 发送消息功能
             function sendMessage(message, type = 'user') {
-                if (message) {
-                    // 创建消息元素
-                    const messageDiv = document.createElement('div');
-                    messageDiv.className = 'message';
-                    messageDiv.textContent = message;
-                    //根据不同的角色将字体颜色进行更改
+                console.log('sendMessage is {}',message)
+                // if (message) {
+                //     // 创建消息元素
+                //     const messageDiv = document.createElement('div');
+                //     messageDiv.className = 'message';
+                //     messageDiv.textContent = message;
+                //     //根据不同的角色将字体颜色进行更改
+                //     if (type === 'user') {
+                //         messageDiv.classList.add('user-left-message');
+                //     } else {
+                //         messageDiv.classList.add('system-left-message');
+                //     }
+                //     // 添加消息到聊天框
+                //     chatMessages.appendChild(messageDiv);
+
+                //     chatMessages.scrollTo({ top: chatMessages.scrollHeight, behavior: 'instant' });
+
+                // }
+                    if (!message) return;
                     if (type === 'user') {
-                        messageDiv.classList.add('user-left-message');
+                        // 没有未完成的组时，新建一组
+                        if (!conversations.length || conversations[conversations.length - 1].system) {
+                            conversations.push({ user: message, system: '' });
+                        } else {
+                            // 如果上一组还没有用户消息（异常情况），填充
+                            conversations[conversations.length - 1].user = message;
+                        }
                     } else {
-                        messageDiv.classList.add('system-left-message');
+                        // 如果当前没有组，则补一条空的用户消息
+                        if (!conversations.length) {
+                            conversations.push({ user: '', system: message });
+                        } else {
+                            conversations[conversations.length - 1].system = message;
+                        }
                     }
-                    // 添加消息到聊天框
-                    chatMessages.appendChild(messageDiv);
 
-                    // 清空输入框
-                    chatInput.value = '';
+                    // 超过最大组数时删除
+                    if (conversations.length > MAX_GROUPS) {
+                        conversations.shift();
+                    }
 
-                    // 自动滚动到底部
-                    chatMessages.scrollTop = chatMessages.scrollHeight;
-                }
+                    renderConversations();
             }
             // 添加聊天消息
             function addChatMessage(message, type = 'user') {
@@ -1080,6 +1209,7 @@
                         const decodedText = json.data;
                         console.log('消息发送成功，返回内容：', decodedText);
                         addChatMessage( decodedText, 'system');
+                        sendMessage(decodedText, 'system');  // 发送到视频流
                     } else {
                         console.error('接口返回错误：', json);
                     }
@@ -1089,6 +1219,7 @@
                 });
                 
                 addChatMessage(message, 'user');
+                sendMessage(message, 'user');  // 发送到视频流
                 $('#chat-message').val('');
             });
 
@@ -1255,6 +1386,18 @@
                 var url = "http://" + host + ":1985/rtc/v1/whep/?app=live&stream=livestream";
                 
                 sdk.play(url).then(function(session) {
+                    // 新增：强制设置视频分辨率
+                    const videoTrack = sdk.stream.getVideoTracks()[0];
+                    if (videoTrack) {
+                      const capabilities = videoTrack.getCapabilities();
+                      if (capabilities && capabilities.width && capabilities.height) {
+                        videoTrack.applyConstraints({
+                          width: { ideal: 1280 },
+                          height: { ideal: 720 },
+                          frameRate: { ideal: 24 }
+                        });
+                      }
+                    }
                     console.log('WebRTC播放已启动，会话ID:', session.sessionid);
                 }).catch(function(reason) {
                     sdk.close();

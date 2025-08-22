@@ -60,6 +60,14 @@ class RedisManager:
     def delete_current_frame(self,key):
         """删除当前帧"""
         self.redis.delete(key)
+    #增加缓存值
+    def set_key_time_value(self, key, time,value):
+        """设置当前帧"""
+        self.redis.setex(key,time, value)
+    def set_key_value(self, key, value):
+        self.redis.set(key, value)
+    def get_key_value(self, key):
+        return self.redis.get(key)
 
     #缓存最大数量
     def set_max_cache_size(self, size):

@@ -177,6 +177,14 @@ class EdgeTTS(BaseTTS):
                     audio_data = python_response.content
                     if audio_data:
                         self.input_stream.write(audio_data)
+                else:
+                    logger.error(f'API request failed with status code: {python_response.status_code}')
+                    # 读取 data目录下的error.wav文件作为错误提示音
+                    file = os.path.join(os.path.dirname(__file__), 'data', 'error.wav')
+                    if os.path.exists(file):
+                        with open(file, 'rb') as f:
+                            audio_data = f.read()
+                            self.input_stream.write(audio_data)
             except requests.exceptions.RequestException as e:
                 logger.error(f'Error in API request: {e}')
                 # 读取 data目录下的error.wav文件作为错误提示音
