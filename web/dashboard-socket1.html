@@ -1,0 +1,1560 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>兴元数字人交互平台</title>
+    <link href="./bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="./bootstrap-icons.css">
+    <style>
+        :root {
+            --primary-color: #4361ee;
+            --secondary-color: #3f37c9;
+            --accent-color: #4895ef;
+            --background-color: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-color: #212529;
+            --border-radius: 10px;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        body {
+            font-family: "SimHei", "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            min-height: 100vh;
+            padding-top: 20px;
+        }
+
+        .dashboard-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            border: none;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        .card-header {
+            background-color: var(--primary-color);
+            color: white;
+            font-weight: 600;
+            padding: 15px 20px;
+            border-bottom: none;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+            background-color: #000;
+            border-radius: var(--border-radius);
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            max-height: 100%;
+            max-width: 100%;
+            object-fit: cover;
+            display: block;
+            margin: auto;
+            border-radius: var(--border-radius);
+            background-color: #000;
+        }
+
+        /* Canvas covers the video container; videos are hidden but kept playing for canvas draw */
+        #video-canvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+            background: #000;
+            transform-origin: center center;
+        }
+        #video, #video-buffer {
+            position: absolute;
+            left: -99999px;
+            top: auto;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .controls-container {
+            padding: 20px;
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+
+        .btn-primary:hover {
+            background-color: var(--secondary-color);
+            border-color: var(--secondary-color);
+        }
+
+        .btn-outline-primary {
+            color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+
+        .btn-outline-primary:hover {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .form-control {
+            border-radius: var(--border-radius);
+            padding: 10px 15px;
+            border: 1px solid #ced4da;
+        }
+
+        .form-control:focus {
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 0.25rem rgba(67, 97, 238, 0.25);
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 5px;
+        }
+
+        .status-connected {
+            background-color: #28a745;
+        }
+
+        .status-disconnected {
+            background-color: #dc3545;
+        }
+
+        .status-connecting {
+            background-color: #ffc107;
+        }
+
+        .asr-container {
+            height: 300px;
+            overflow-y: auto;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: var(--border-radius);
+            border: 1px solid #ced4da;
+        }
+
+        .asr-text {
+            margin-bottom: 10px;
+            padding: 10px;
+            background-color: white;
+            border-radius: var(--border-radius);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .user-message {
+            background-color: #e3f2fd;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        /* 基础气泡样式 */
+        .user-left-message,
+        .system-left-message {
+          position: relative;
+          padding: 12px 15px;
+          border-radius: 10px;
+          margin: 10px 0;
+          max-width: 70%;
+          line-height: 1.5;
+          word-wrap: break-word;
+          box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        /* （右侧气泡） */
+        .user-left-message {
+          /* background-color: #c91520;  蓝色背景 */
+          color: white;
+          align-self: flex-end;        /* 右侧对齐 */
+          margin-left: 30%;            /* 留出左侧空间 */
+        }
+
+        /* 箭头（右侧三角） */
+        .user-left-message::before {
+          content: '';
+          position: absolute;
+          top: 15px;
+          right: -10px;                /* 定位到右侧外部 */
+          width: 0;
+          height: 0;
+          border: 10px solid transparent;
+          border-left-color: #c91520;  /* 箭头颜色与背景一致 */
+          border-right: 0;
+          border-top: 0;
+        }
+
+        /* 系统消息（左侧气泡） */
+        .system-left-message {
+
+          color: white;
+          align-self: flex-start;      /* 左侧对齐 */
+        }
+
+        /* 系统消息箭头（左侧三角） */
+        .system-left-message::before {
+          content: '';
+          position: absolute;
+          top: 15px;
+          left: -10px;                 /* 定位到左侧外部 */
+          width: 0;
+          height: 0;
+          border: 10px solid transparent;
+          border-right-color: #007aff; /* 箭头颜色与背景一致 */
+          border-left: 0;
+          border-top: 0;
+        }
+
+        .system-message {
+            background-color: #f1f8e9;
+            border-left: 4px solid #8bc34a;
+        }
+
+        .recording-indicator {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background-color: rgba(220, 53, 69, 0.8);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            display: none;
+        }
+
+        .recording-indicator.active {
+            display: flex;
+            align-items: center;
+        }
+
+        .recording-indicator .blink {
+            width: 10px;
+            height: 10px;
+            background-color: #fff;
+            border-radius: 50%;
+            margin-right: 5px;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0.3; }
+            100% { opacity: 1; }
+        }
+
+        .mode-switch {
+            margin-bottom: 20px;
+        }
+
+        .nav-tabs .nav-link {
+            color: var(--text-color);
+            border: none;
+            padding: 10px 20px;
+            border-radius: var(--border-radius) var(--border-radius) 0 0;
+        }
+
+        .nav-tabs .nav-link.active {
+            color: var(--primary-color);
+            background-color: var(--card-bg);
+            border-bottom: 3px solid var(--primary-color);
+            font-weight: 600;
+        }
+
+        .tab-content {
+            padding: 20px;
+            background-color: var(--card-bg);
+            border-radius: 0 0 var(--border-radius) var(--border-radius);
+        }
+
+        .settings-panel {
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: var(--border-radius);
+            margin-top: 15px;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding: 20px 0;
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+        
+        .voice-record-btn {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background-color: var(--primary-color);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            margin: 0 auto;
+        }
+        
+        .voice-record-btn:hover {
+            background-color: var(--secondary-color);
+            transform: scale(1.05);
+        }
+        
+        .voice-record-btn:active {
+            background-color: #dc3545;
+            transform: scale(0.95);
+        }
+        
+        .voice-record-btn i {
+            font-size: 24px;
+        }
+        
+        .voice-record-label {
+            text-align: center;
+            margin-top: 10px;
+            font-size: 14px;
+            color: #6c757d;
+        }
+        
+        .video-size-control {
+            margin-top: 15px;
+        }
+        
+        .recording-pulse {
+            animation: pulse 1.5s infinite;
+        }
+        /*改动*/
+        .top-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 30vw;
+            padding-left: 10px;
+
+            /* 改动*/
+            background-color: #222222cc; /* 更兼容的透明色写法 */
+            box-shadow: none; /* 先去掉测试看看闪动是否还在 */
+            border-radius: 8px;
+            /*backdrop-filter: blur(5px);*/
+            color: white;
+            z-index: 999;
+            display: flex;
+            flex-direction: column;
+              backface-visibility: hidden; /* 有时可以避免闪动 */
+        }
+
+        /* 在原有样式表中添加以下样式 */
+        .chat-container {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            width: 30vw;
+            height: 50vh;
+            /* 改动*/
+            background-color: #222222cc; /* 更兼容的透明色写法 */
+            box-shadow: none; /* 先去掉测试看看闪动是否还在 */
+            border-radius: 8px;
+            /*backdrop-filter: blur(5px);*/
+            color: black;
+            z-index: 999;
+            display: flex;
+            flex-direction: column;
+
+        }
+
+          .chat-messages {
+            flex: 1;
+            padding: 12px;
+            overflow-y: auto;
+            word-break: break-word;
+             will-change: transform;
+             -webkit-overflow-scrolling: touch; /* 安卓滚动优化 */
+        }
+
+        .chat-input {
+            display: flex;
+            gap: 8px;
+            padding: 12px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .chat-input input {
+            flex: 1;
+            padding: 8px;
+            border: none;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.9);
+        }
+
+        .chat-input button {
+            padding: 8px 16px;
+            background: #4CAF50;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .chat-input button:hover {
+            background: #45a049;
+        }
+
+      .visualizer-container {
+        position: fixed; /* 浮动于浏览器窗口 */
+        left: 50%;
+        bottom: 120px;
+        transform: translateX(-50%); /* 水平居中修正 */
+         z-index: 999;
+        background: rgba(0, 0, 0, 0.7); /* 可选：半透明背景 */
+        padding: 1px;
+        display: flex;
+        align-items: flex-end;
+      }
+
+    .visualizer-top {
+        position: fixed; /* 浮动于浏览器窗口 */
+        left: 50%;
+        top: 140px;
+        transform: translateX(-50%); /* 水平居中修正 */
+         z-index: 999;
+        padding: 1px;
+        display: flex;
+        align-items: flex-end;
+      }
+
+      .progress-container {
+        width: 300px;
+        height: 20px;
+        background-color: #ccc;
+        border-radius: 10px;
+        overflow: hidden;
+      }
+
+      .progress-bar {
+        width: 0%;
+        height: 100%;
+        background-color: #4caf50;
+        transition: width 0.3s ease;
+      }
+        
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7);
+            }
+            70% {
+                box-shadow: 0 0 0 15px rgba(220, 53, 69, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(220, 53, 69, 0);
+            }
+        }
+
+        @keyframes rainbowText {
+          0% { background-position: 0% 50%; }
+          100% { background-position: 100% 50%; }
+        }
+
+                /* 移动端适配 */
+        @media (max-width: 768px) {
+            .chat-container {
+                width: 80vw;
+                height: 30vh;
+                left: 10px;
+                right: 10px;
+                bottom: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="row">
+            <div class="col-12">
+                <h1 class="text-center mb-4">兴元数字人交互平台</h1>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- 视频区域 -->
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <div>
+                            <span class="status-indicator status-disconnected" id="connection-status"></span>
+                            <span id="status-text">未连接</span>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <!-- 安卓兼容性信息面板 -->
+                        <div id="android-compat-panel" class="p-2 bg-light border-bottom" style="display: none;">
+                            <small class="text-muted">
+                                <strong>设备兼容性:</strong> 
+                                <span id="compat-info">检测中...</span>
+                            </small>
+                        </div>
+                        <div class="video-container">
+                            <canvas id="video-canvas"></canvas>
+                            <video id="video" autoplay playsinline disablePictureInPicture ></video>
+                            <video id="video-buffer" autoplay playsinline disablePictureInPicture ></video>
+                            <button id="fullscreen-btn" class="btn btn-sm btn-outline-light position-absolute" style="top: 15px; left: 15px; z-index: 10;">
+                                <i class="bi bi-arrows-fullscreen"></i>
+                            </button>
+                            <div class="recording-indicator" id="recording-indicator">
+                                <div class="blink"></div>
+                                <span>录制中</span>
+                            </div>
+                            <!-- 在body末尾添加聊天框结构 -->
+                             <div class="visualizer-top" id="visualizerTop"  style="display: none">
+                                <h1 style="
+                                    font-family: 'KaiTi', '楷体', serif;
+                                    background: linear-gradient(270deg, red, orange, yellow, green, cyan, blue, purple, red);
+                                    background-size: 1000% 100%;
+                                    -webkit-background-clip: text;
+                                    -webkit-text-fill-color: transparent;
+                                    animation: rainbowText 8s linear infinite;
+                                  ">请说你好小园来唤醒我</h1>
+                            </div>
+                            <div class="top-container">
+                                    <h1 class="title">办理业务请说</h1>
+                                    <div id="heap">当前堆内存</div>
+                                    <div id="resource-stats" style="font-family: monospace; white-space: pre; color: #fff; margin-top: 6px;"></div>
+                                    <div class="business-grid">
+                                        <div class="business-card">
+                                            <h2>个人业务</h2>
+                                            <p>大额存单 | 个人钱包 | 贷款产品 | 消费贷产品 | 信用卡申请 | 存款证明</p>
+                                        </div>
+                                        <div class="business-card">
+                                            <h2>产品业务</h2>
+                                            <p>数字人民币钱包 | 对公钱包 | 收费标准</p>
+                                        </div>
+                                        <div class="business-card">
+                                            <h2>公司业务</h2>
+                                            <p>单位定期存款 | 通知存款 | 协定存款</p>
+                                        </div>
+                                        <div class="business-card">
+                                            <h2>贷款业务</h2>
+                                            <p>二类账户贷款 | 偿还贷款 | 偿还信用卡</p>
+                                        </div>
+                                        <div class="business-card">
+                                            <h2>其他业务</h2>
+                                            <p>企业年金 | 数字人民币 | 银企对账 | 贵金属积存</p>
+                                        </div>
+                                        <div class="business-card">
+                                            <h2>随心智贷</h2>
+                                            <p>办理方式 | 贷款期限 | 额度金额 | 自动还款日</p>
+                                        </div>
+                                        <div class="business-card">
+                                            <h2>中银易贷</h2>
+                                            <p>贷款主体 | 计息方式 | 利率</p>
+                                        </div>
+
+                                    </div>
+                            </div>
+                            <div class="chat-container">
+                                <div class="chat-messages" id="chatMessages"></div>
+                                <div class="chat-input" style="display: none">
+                                    <input type="text" id="chatInput" placeholder="输入消息...">
+                                    <button id="sendBtn">发送</button>
+                                </div>
+                            </div>
+
+                             <!-- 音频可视化容器 -->
+                            <div class="visualizer-container" id="visualizer" style="display: none">
+                                <div class="progress-container">
+                                    <div class="progress-bar" id="audioLevel"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="controls-container">
+                            <div class="row">
+
+                                <div class="col-md-6 mb-3">
+                                    <div class="d-flex">
+                                         <button class="btn btn-outline-primary flex-grow-1 me-2" id="mark">
+                                            <i class="bi bi-record-fill"></i> 启动麦克风
+                                        </button>
+                                        <button class="btn btn-outline-primary flex-grow-1 me-2" id="btn_start_record">
+                                            <i class="bi bi-record-fill"></i> 开始录制
+                                        </button>
+                                        <button class="btn btn-outline-danger flex-grow-1" id="btn_stop_record" disabled>
+                                            <i class="bi bi-stop-fill"></i> 停止录制
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <button class="btn btn-primary w-100" id="start">
+                                        <i class="bi bi-play-fill"></i> 开始连接
+                                    </button>
+                                    <button class="btn btn-danger w-100" id="stop" style="display: none;">
+                                        <i class="bi bi-stop-fill"></i> 停止连接
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-12">
+                                    <div class="video-size-control">
+                                        <label for="video-size-slider" class="form-label">视频大小调节: <span id="video-size-value">100%</span></label>
+                                        <input type="range" class="form-range" id="video-size-slider" min="50" max="150" value="100">
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="settings-panel mt-3">
+                                <div class="row">
+                                    <div class="col-md-12">
+                                        <div class="form-check form-switch mb-3">
+                                            <input class="form-check-input" type="checkbox" id="use-stun">
+                                            <label class="form-check-label" for="use-stun">使用STUN服务器</label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧交互 -->
+            <div class="col-lg-4">
+                <div class="card">
+                    <div class="card-header">
+                        <ul class="nav nav-tabs card-header-tabs" id="interaction-tabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" id="chat-tab" data-bs-toggle="tab" data-bs-target="#chat" type="button" role="tab" aria-controls="chat" aria-selected="true">对话模式</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="tts-tab" data-bs-toggle="tab" data-bs-target="#tts" type="button" role="tab" aria-controls="tts" aria-selected="false">朗读模式</button>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="card-body">
+                        <div class="tab-content" id="interaction-tabs-content">
+                            <!-- 对话模式 -->
+                            <div class="tab-pane fade show active" id="chat" role="tabpanel" aria-labelledby="chat-tab">
+                                <div class="asr-container mb-3" id="chat-messages">
+                                    <div class="asr-text system-message">
+                                        系统: 欢迎使用兴元数字人聊天系统，请点击"开始连接"按钮开始对话。
+                                    </div>
+                                </div>
+                                
+                                <form id="chat-form">
+                                    <div class="input-group mb-3">
+                                        <textarea class="form-control" id="chat-message" rows="3" placeholder="输入您想对数字人说的话..."></textarea>
+                                        <button class="btn btn-primary" type="submit">
+                                            <i class="bi bi-send"></i> 发送
+                                        </button>
+                                    </div>
+                                </form>
+                                
+                                <!-- 按住说话按钮 -->
+
+                                <div class="voice-record-btn" id="voice-record-btn">
+                                    <i class="bi bi-mic-fill"></i>
+                                </div>
+                                <div class="voice-record-label">按住说话，松开发送</div>
+                            </div>
+                            
+                            <!-- 朗读模式 -->
+                            <div class="tab-pane fade" id="tts" role="tabpanel" aria-labelledby="tts-tab">
+                                <form id="echo-form">
+                                    <div class="mb-3">
+                                        <label for="message" class="form-label">输入要朗读的文本</label>
+                                        <textarea class="form-control" id="message" rows="6" placeholder="输入您想让数字人朗读的文字..."></textarea>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary w-100">
+                                        <i class="bi bi-volume-up"></i> 朗读文本
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Made with ❤️ by Marstaos | Frontend & Performance Optimization</p>
+        </div>
+    </div>
+
+    <!-- 隐藏的会话ID -->
+    <input type="hidden" id="sessionid" value="0">
+
+    <script src="connection-manager-config.js"></script>
+    <script src="client.js"></script>
+    <script src="srs.sdk.js"></script>
+    <script src="bootstrap.bundle.min.js"></script>
+    <script src="jquery-3.6.0.min.js"></script>
+    <script src="socket.min.js"></script>
+    <script>
+            function __syncBufferGeometry(){
+                try{
+                    var container = document.querySelector('.video-container');
+                    var canvas = document.getElementById('video-canvas');
+                    if (!container || !canvas) return;
+                    var rect = container.getBoundingClientRect();
+                    var dpr = window.devicePixelRatio || 1;
+                    canvas.width = Math.round(rect.width * dpr);
+                    canvas.height = Math.round(rect.height * dpr);
+                    canvas.style.width = rect.width + 'px';
+                    canvas.style.height = rect.height + 'px';
+                }catch(e){}
+            }
+            // 同步无缝切换覆盖层在窗口大小/全屏变化时的几何
+            window.addEventListener('resize', function(){ try{ __syncBufferGeometry(); }catch(e){} });
+            document.addEventListener('fullscreenchange', function(){ try{ __syncBufferGeometry(); }catch(e){} });
+            document.addEventListener("DOMContentLoaded", function() {
+              setTimeout(function() {
+                try{ __syncBufferGeometry(); }catch(e){}
+                
+                // 检测并显示安卓兼容性信息
+                try {
+                    var isAndroid = /Android/i.test(navigator.userAgent);
+                    var isMobile = /Mobile|Android|iPhone|iPad/i.test(navigator.userAgent);
+                    var hasWebRTC = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+                    var hasCanvas = !!document.createElement('canvas').getContext;
+                    var hasRVFC = typeof HTMLVideoElement !== 'undefined' && HTMLVideoElement.prototype && 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+                    
+                    if (isAndroid || isMobile) {
+                        var compatPanel = document.getElementById('android-compat-panel');
+                        var compatInfo = document.getElementById('compat-info');
+                        if (compatPanel && compatInfo) {
+                            compatPanel.style.display = 'block';
+                            var info = [];
+                            info.push(isAndroid ? 'Android' : 'Mobile');
+                            info.push('WebRTC:' + (hasWebRTC ? '✓' : '✗'));
+                            info.push('Canvas:' + (hasCanvas ? '✓' : '✗'));
+                            info.push('RVFC:' + (hasRVFC ? '✓' : '✗'));
+                            compatInfo.textContent = info.join(' | ');
+                            
+                            if (!hasWebRTC) {
+                                compatInfo.innerHTML += ' <span class="text-danger">(WebRTC不支持)</span>';
+                            }
+                        }
+                    }
+                } catch(e) {
+                    console.warn('兼容性检测失败:', e);
+                }
+                
+                var btn = document.getElementById("start");
+                if (btn) btn.click();
+                //获取麦克风
+                var markBtn = document.getElementById("mark");
+                if (markBtn) markBtn.click();
+                //$('#fullscreen-btn').click
+
+              }, 4000); // 4 秒后触发
+            });
+
+   </script>
+    <script>
+        const visualizerContainer = document.getElementById('visualizer');
+        const  visualizerTop = document.getElementById('visualizerTop')
+        let volumeBars,audioStream,audioContext,analyser, scriptProcessor;
+        $(document).ready(function() {
+            $('#video-size-slider').on('input', function() {
+                const value = $(this).val();
+                $('#video-size-value').text(value + '%');
+                const scale = Math.max(0.5, Math.min(1.5, value / 100));
+                $('#video-canvas').css('transform', 'scale(' + scale + ')');
+            });
+            function updateConnectionStatus(status) {
+                const statusIndicator = $('#connection-status');
+                const statusText = $('#status-text');
+                
+                statusIndicator.removeClass('status-connected status-disconnected status-connecting');
+                
+                switch(status) {
+                    case 'connected':
+                        statusIndicator.addClass('status-connected');
+                        $('#visualizerTop').show()
+                        statusText.text('已连接');
+                        break;
+                    case 'connecting':
+                        statusIndicator.addClass('status-connecting');
+                        statusText.text('连接中...');
+                        break;
+                    case 'disconnected':
+                    default:
+                        statusIndicator.addClass('status-disconnected');
+                        $('#visualizerTop').hide()
+                        statusText.text('未连接');
+                        break;
+                }
+            }
+
+            const socket = io("https://192.168.1.28:8011");
+
+            socket.on('connect', () => {
+            console.log('WebSocket 已连接');
+            });
+
+            socket.on('message', (data) => {
+                // 判断是否显示visualizer-container
+                if (data.text === '开始可视化') {
+                    //console.log('开始可视化');
+                    $('#visualizer').show();
+                } else if (data.text === '停止可视化') {
+                    // console.log('停止可视化');
+                    $('#visualizer').hide();
+                } else {
+                    addChatMessage(data.text, 'system');  // 使用你已有的函数显示到右侧聊天框
+                    sendMessage(data.text,'user');  // 发送到视频流
+                        //调用human
+                        fetch('/human', {
+                            body: JSON.stringify({
+                            text: data.text,
+                            type: 'chat',
+                            interrupt: true,
+                            sessionid: parseInt(document.getElementById('sessionid').value),
+                        }),
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        method: 'POST'
+                    })
+                    .then(res => res.json())  // 解析为 JSON
+                    .then(json => {
+                        if (json.code === 0) {
+                            // 解码返回的 Unicode 字符串
+                            const decodedText = json.data;
+                            if (decodedText){
+                                 console.log('消息发送成功，返回内容：', decodedText);
+                                 if(! decodedText.includes("你好呀")){
+                                     addChatMessage( decodedText, 'system');
+                                     sendMessage(decodedText, 'system');  // 发送到视频流
+                                 }
+                            }
+                        } else {
+                            console.error('接口返回错误：', json);
+                        }
+                    })
+                    .catch(err => {
+                        console.error('发送消息时发生错误:', err);
+                    });
+                }
+            });
+
+            socket.on('disconnect', () => {
+            console.log('WebSocket 已断开');
+            });
+            // 获取聊天相关DOM元素
+            const chatInput = document.getElementById('chatInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const chatMessages = document.getElementById('chatMessages');
+
+            // 最多保留 3 组对话（用户+系统）
+            const MAX_GROUPS = 3;
+            // 内存中存储对话组，每组形如 { user: "...", system: "..." }
+            let conversations = [];
+
+            // 添加对话组
+            function addConversation(userMessage, systemMessage) {
+                if (!userMessage && !systemMessage) return;
+
+                // 添加新组
+                conversations.push({
+                    user: userMessage || '',
+                    system: systemMessage || ''
+                });
+
+                // 超过最大组数时，删除最早的一组
+                if (conversations.length > MAX_GROUPS) {
+                    conversations.shift();
+                }
+
+                // 重新渲染
+                renderConversations();
+            }
+
+            // 渲染聊天内容
+            function renderConversations() {
+                // 清空 DOM
+                chatMessages.innerHTML = '';
+
+                // 一次性渲染所有组
+                conversations.forEach(conv => {
+                    // 用户消息
+                    if (conv.user) {
+                        const userDiv = document.createElement('div');
+                        userDiv.className = 'message user-left-message';
+                        userDiv.textContent = conv.user;
+                        chatMessages.appendChild(userDiv);
+                    }
+                    // 系统消息
+                    if (conv.system) {
+                        const sysDiv = document.createElement('div');
+                        sysDiv.className = 'message system-left-message';
+                        sysDiv.textContent = conv.system;
+                        chatMessages.appendChild(sysDiv);
+                    }
+                });
+
+                // 滚动到底部（避免安卓动画渲染卡顿，直接赋值）
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+
+            // 发送消息功能
+            function sendMessage(message, type = 'user') {
+                console.log('sendMessage is {}',message)
+                // if (message) {
+                //     // 创建消息元素
+                //     const messageDiv = document.createElement('div');
+                //     messageDiv.className = 'message';
+                //     messageDiv.textContent = message;
+                //     //根据不同的角色将字体颜色进行更改
+                //     if (type === 'user') {
+                //         messageDiv.classList.add('user-left-message');
+                //     } else {
+                //         messageDiv.classList.add('system-left-message');
+                //     }
+                //     // 添加消息到聊天框
+                //     chatMessages.appendChild(messageDiv);
+
+                //     chatMessages.scrollTo({ top: chatMessages.scrollHeight, behavior: 'instant' });
+
+                // }
+                    if (!message) return;
+                    if (type === 'user') {
+                        // 没有未完成的组时，新建一组
+                        if (!conversations.length || conversations[conversations.length - 1].system) {
+                            conversations.push({ user: message, system: '' });
+                        } else {
+                            // 如果上一组还没有用户消息（异常情况），填充
+                            conversations[conversations.length - 1].user = message;
+                        }
+                    } else {
+                        // 如果当前没有组，则补一条空的用户消息
+                        if (!conversations.length) {
+                            conversations.push({ user: '', system: message });
+                        } else {
+                            conversations[conversations.length - 1].system = message;
+                        }
+                    }
+
+                    // 超过最大组数时删除
+                    if (conversations.length > MAX_GROUPS) {
+                        conversations.shift();
+                    }
+
+                    renderConversations();
+            }
+            // 添加聊天消息
+            function addChatMessage(message, type = 'user') {
+                // const messagesContainer = $('#chat-messages');
+                // const messageClass = type === 'user' ? 'user-message' : 'system-message';
+                // const sender = type === 'user' ? '您' : '数字人';
+                
+                // const messageElement = $(`
+                //     <div class="asr-text ${messageClass}">
+                //         ${sender}: ${message}
+                //     </div>
+                // `);
+                
+                // messagesContainer.append(messageElement);
+                // messagesContainer.scrollTop(messagesContainer[0].scrollHeight);
+            }
+
+            let isFull = false;
+
+            function enterFullscreen() {
+                const videoContainer = document.querySelector('.video-container');
+
+                // 设置容器高度为屏幕高度
+                videoContainer.style.height = window.innerHeight + 'px';
+
+                if (videoContainer.requestFullscreen) {
+                    videoContainer.requestFullscreen();
+                } else if (videoContainer.webkitRequestFullscreen) {
+                    videoContainer.webkitRequestFullscreen();
+                } else if (videoContainer.msRequestFullscreen) {
+                    videoContainer.msRequestFullscreen();
+                }
+            }
+
+            function exitFullscreen() {
+                document.exitFullscreen();
+
+                // 恢复容器原始高度
+                const videoContainer = document.querySelector('.video-container');
+                videoContainer.style.height = '';
+            }
+
+            // 全屏按钮点击事件
+            $('#fullscreen-btn').click(function () {
+                if (!isFull) {
+                    enterFullscreen();
+                } else {
+                    exitFullscreen();
+                }
+                isFull = !isFull;
+            });
+
+            // 开始/停止按钮
+            $('#start').click(function() {
+                updateConnectionStatus('connecting');
+                start();
+                $(this).hide();
+                $('#stop').show();
+
+                // 添加定时器检查视频流是否已加载
+                let connectionCheckTimer = setInterval(function() {
+                    const video = document.getElementById('video');
+                    // 检查视频是否有数据
+                    if (video.readyState >= 3 && video.videoWidth > 0) {
+                        updateConnectionStatus('connected');
+                        clearInterval(connectionCheckTimer);
+                    }
+                }, 2000); // 每2秒检查一次
+                
+                // 60秒后如果还是连接中状态，就停止检查
+                setTimeout(function() {
+                    if (connectionCheckTimer) {
+                        clearInterval(connectionCheckTimer);
+                    }
+                }, 60000);
+            });
+
+            $('#stop').click(function() {
+                stop();
+                $(this).hide();
+                $('#start').show();
+                updateConnectionStatus('disconnected');
+            });
+
+             $('#mark').click(function() {
+                 startListen1()
+             });
+
+            let audioContext;
+            let audioStream;
+            let analyser;
+
+            let audioWS = null;
+            let processor = null;
+
+            async function startListen1() {
+                try {
+                    // 1. 判断是否支持麦克风
+                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                        alert("当前浏览器不支持麦克风访问");
+                        return;
+                    }
+
+                    // 2. 简化音频约束，兼容安卓系统默认浏览器
+                    const constraints = { audio: true };
+
+                    // 3. 请求麦克风权限
+                    audioStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    console.log("麦克风访问成功");
+
+                    // 4. 创建 AudioContext（兼容处理）
+                    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                    audioContext = new AudioContextClass();
+
+                    // 5. WebView 中 audioContext 可能默认 suspended，需要恢复
+                    if (audioContext.state === 'suspended') {
+                        await audioContext.resume();
+                    }
+
+                    // 6. 创建音频分析器
+                    const source = audioContext.createMediaStreamSource(audioStream);
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = 256;
+
+                    const bufferLength = analyser.frequencyBinCount;
+                    const dataArray = new Uint8Array(bufferLength);
+
+                    // 7. 可视化更新循环
+                    function update() {
+                        analyser.getByteFrequencyData(dataArray);
+                        updateVisualizer(dataArray);
+                        requestAnimationFrame(update);
+                    }
+
+                    createVisualizer(); // 你的可视化实现
+                    update();
+                    //创建websock推送数据到后端
+                    audioWS = new WebSocket("wss://192.168.1.28:8011/audio");
+                    audioWS.binaryType = "arraybuffer";
+
+                    audioWS.onopen = () => {
+                        console.log("🔗 语音 WebSocket 已连接");
+                        audioWS.send(JSON.stringify({
+                            type: "meta",
+                            sampleRate: audioContext.sampleRate
+                        }));
+                    };
+                    audioWS.onclose = () => {
+                        console.warn("❌ 语音 WebSocket 已断开");
+                    };
+                    audioWS.onerror = (e) => {
+                        console.error("WebSocket 错误:", e);
+                    };
+
+                    // 7. 创建处理器采样音频数据为 Int16 PCM
+                    processor = audioContext.createScriptProcessor(2048, 1, 1);
+
+                    processor.onaudioprocess = (e) => {
+                        const input = e.inputBuffer.getChannelData(0);
+                        const pcmData = new Int16Array(input.length);
+
+                        for (let i = 0; i < input.length; i++) {
+                            const s = Math.max(-1, Math.min(1, input[i]));
+                            pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                        }
+
+                        // 通过 WebSocket 发送音频数据
+                        if (audioWS && audioWS.readyState === WebSocket.OPEN) {
+                            audioWS.send(pcmData.buffer);
+                        }
+                    };
+
+                    // 8. 连接处理器
+                    source.connect(analyser);     // 可视化
+                    source.connect(processor);    // 音频推送
+                    processor.connect(audioContext.destination);  // 避免被GC销毁
+
+                } catch (err) {
+                    console.error("麦克风获取失败:", err);
+
+                    if (err.name === "NotAllowedError") {
+                        alert("权限被拒绝，请前往设置中开启麦克风权限。");
+                    } else if (err.name === "NotFoundError") {
+                        alert("未检测到麦克风设备。");
+                    } else {
+                        alert(`无法访问麦克风: ${err.message}`);
+                    }
+                }
+
+            }
+            // 创建音频可视化条
+            function createVisualizer() {
+                visualizerContainer.innerHTML = '';
+                volumeBars = [];
+
+                // 创建16个柱状条
+                for (let i = 0; i < 16; i++) {
+                    const bar = document.createElement('div');
+                    bar.className = 'visualizer-bar';
+                    bar.style.height = '3px';
+                    visualizerContainer.appendChild(bar);
+                    volumeBars.push(bar);
+                }
+            }
+
+            // 更新音频可视化
+            function updateVisualizer(dataArray) {
+                if (!volumeBars.length) return;
+
+                let sum = 0;
+                for (let i = 0; i < dataArray.length; i++) {
+                    sum += dataArray[i];
+                }
+
+                // 更新频谱柱状图
+                const barCount = volumeBars.length;
+                for (let i = 0; i < barCount; i++) {
+                    const barIndex = Math.floor(i * dataArray.length / barCount);
+                    const value = dataArray[barIndex];
+                    const barHeight = (value / 256) * 40 + 3;
+                    volumeBars[i].style.height = `${barHeight}px`;
+                    volumeBars[i].style.width = '10px'
+
+                    const hue = (i / barCount) * 360; // 不同 bar 不同色相
+                    volumeBars[i].style.backgroundColor = `hsl(${hue}, 100%, 60%)`;
+                }
+            }
+
+            // 录制功能
+            $('#btn_start_record').click(function() {
+                console.log('Starting recording...');
+                fetch('/record', {
+                    body: JSON.stringify({
+                        type: 'start_record',
+                        sessionid: parseInt(document.getElementById('sessionid').value),
+                    }),
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    method: 'POST'
+                }).then(function(response) {
+                    if (response.ok) {
+                        console.log('Recording started.');
+                        $('#btn_start_record').prop('disabled', true);
+                        $('#btn_stop_record').prop('disabled', false);
+                        $('#recording-indicator').addClass('active');
+                    } else {
+                        console.error('Failed to start recording.');
+                    }
+                }).catch(function(error) {
+                    console.error('Error:', error);
+                });
+            });
+
+            $('#btn_stop_record').click(function() {
+                console.log('Stopping recording...');
+                fetch('/record', {
+                    body: JSON.stringify({
+                        type: 'end_record',
+                        sessionid: parseInt(document.getElementById('sessionid').value),
+                    }),
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    method: 'POST'
+                }).then(function(response) {
+                    if (response.ok) {
+                        console.log('Recording stopped.');
+                        $('#btn_start_record').prop('disabled', false);
+                        $('#btn_stop_record').prop('disabled', true);
+                        $('#recording-indicator').removeClass('active');
+                    } else {
+                        console.error('Failed to stop recording.');
+                    }
+                }).catch(function(error) {
+                    console.error('Error:', error);
+                });
+            });
+
+            $('#echo-form').on('submit', function(e) {
+                e.preventDefault();
+                var message = $('#message').val();
+                if (!message.trim()) return;
+                
+                console.log('Sending echo message:', message);
+                fetch('/human', {
+                    body: JSON.stringify({
+                        text: message,
+                        type: 'echo',
+                        interrupt: true,
+                        sessionid: parseInt(document.getElementById('sessionid').value),
+                    }),
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    method: 'POST'
+                });
+                
+                $('#message').val('');
+                addChatMessage(`已发送朗读请求: "${message}"`, 'system');
+            });
+
+            // 聊天模式表单提交
+            $('#chat-form').on('submit', function(e) {
+                e.preventDefault();
+                var message = $('#chat-message').val();
+                if (!message.trim()) return;
+                
+                fetch('/human', {
+                    body: JSON.stringify({
+                        text: message,
+                        type: 'chat',
+                        interrupt: true,
+                        sessionid: parseInt(document.getElementById('sessionid').value),
+                    }),
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    method: 'POST'
+                })
+                .then(res => res.json())  // 解析为 JSON
+                .then(json => {
+                    console.log('res json:', json);
+                    if (json.code === 0) {
+                        // 解码返回的 Unicode 字符串
+                        const decodedText = json.data;
+                        console.log('消息发送成功，返回内容：', decodedText);
+                        addChatMessage( decodedText, 'system');
+                        sendMessage(decodedText, 'system');  // 发送到视频流
+                    } else {
+                        console.error('接口返回错误：', json);
+                    }
+                })
+                .catch(err => {
+                    console.error('发送消息时发生错误:', err);
+                });
+                
+                addChatMessage(message, 'user');
+                sendMessage(message, 'user');  // 发送到视频流
+                $('#chat-message').val('');
+            });
+
+            // 按住说话功能
+            let mediaRecorder;
+            let audioChunks = [];
+            let isRecording = false;
+            let recognition;
+            
+            // 检查浏览器是否支持语音识别
+            const isSpeechRecognitionSupported = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
+            
+            if (isSpeechRecognitionSupported) {
+                recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+                recognition.continuous = true;
+                recognition.interimResults = true;
+                recognition.lang = 'zh-CN';
+                
+                recognition.onresult = function(event) {
+                    let interimTranscript = '';
+                    let finalTranscript = '';
+                    
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) {
+                            finalTranscript += event.results[i][0].transcript;
+                        } else {
+                            interimTranscript += event.results[i][0].transcript;
+                            $('#chat-message').val(interimTranscript);
+                        }
+                    }
+                    
+                    if (finalTranscript) {
+                        $('#chat-message').val(finalTranscript);
+                    }
+                };
+                
+                recognition.onerror = function(event) {
+                    console.error('语音识别错误:', event.error);
+                };
+            }
+            
+            // 按住说话按钮事件
+            $('#voice-record-btn').on('mousedown touchstart', function(e) {
+                e.preventDefault();
+                startRecording();
+            }).on('mouseup mouseleave touchend', function() {
+                if (isRecording) {
+                    stopRecording();
+                }
+            });
+            
+            // 开始录音
+            function startRecording() {
+                if (isRecording) return;
+                
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(function(stream) {
+                        audioChunks = [];
+                        mediaRecorder = new MediaRecorder(stream);
+                        
+                        mediaRecorder.ondataavailable = function(e) {
+                            if (e.data.size > 0) {
+                                audioChunks.push(e.data);
+                            }
+                        };
+                        
+                        mediaRecorder.start();
+                        isRecording = true;
+                        
+                        $('#voice-record-btn').addClass('recording-pulse');
+                        $('#voice-record-btn').css('background-color', '#dc3545');
+                        
+                        if (recognition) {
+                            recognition.start();
+                        }
+                    })
+                    .catch(function(error) {
+                        console.error('无法访问麦克风:', error);
+                        alert('无法访问麦克风，请检查浏览器权限设置。');
+                    });
+            }
+
+            function stopRecording() {
+                if (!isRecording) return;
+                
+                mediaRecorder.stop();
+                isRecording = false;
+                
+                // 停止所有音轨
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                
+                // 视觉反馈恢复
+                $('#voice-record-btn').removeClass('recording-pulse');
+                $('#voice-record-btn').css('background-color', '');
+                
+                // 停止语音识别
+                if (recognition) {
+                    recognition.stop();
+                }
+                
+                // 获取识别的文本并发送
+                setTimeout(function() {
+                    const recognizedText = $('#chat-message').val().trim();
+                    if (recognizedText) {
+                        // 发送识别的文本
+                        fetch('/human', {
+                            body: JSON.stringify({
+                                text: recognizedText,
+                                type: 'chat',
+                                interrupt: true,
+                                sessionid: parseInt(document.getElementById('sessionid').value),
+                            }),
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            method: 'POST'
+                        });
+                        
+                        addChatMessage(recognizedText, 'user');
+                        $('#chat-message').val('');
+                    }
+                }, 500); 
+            }
+
+            // WebRTC 相关功能
+            if (typeof window.onWebRTCConnected === 'function') {
+                const originalOnConnected = window.onWebRTCConnected;
+                window.onWebRTCConnected = function() {
+                    updateConnectionStatus('connected');
+                    if (originalOnConnected) originalOnConnected();
+                };
+            } else {
+                window.onWebRTCConnected = function() {
+                    updateConnectionStatus('connected');
+                };
+            }
+
+            // 当连接断开时更新状态
+            if (typeof window.onWebRTCDisconnected === 'function') {
+                const originalOnDisconnected = window.onWebRTCDisconnected;
+                window.onWebRTCDisconnected = function() {
+                    updateConnectionStatus('disconnected');
+                    if (originalOnDisconnected) originalOnDisconnected();
+                };
+            } else {
+                window.onWebRTCDisconnected = function() {
+                    updateConnectionStatus('disconnected');
+                };
+            }
+            
+        });
+       
+        // 资源与播放质量监控（轻量，仅更新文本，避免重排）
+        (function(){
+            const resourceDiv = document.getElementById('resource-stats');
+            const videoEl = document.getElementById('video');
+            let lastTotalFrames = null;
+            let lastCheckTs = null;
+            let loopTs = performance.now();
+            let lastLoopDelay = 0;
+            // 永久展示的低码率告警（持续累积，每1分钟追加一次）
+            let persistentWarnings = [];
+            let lastWarnAt = 0; // ms timestamp
+            setInterval(() => {
+                const now = performance.now();
+                lastLoopDelay = Math.max(0, Math.round(now - loopTs - 1000));
+                loopTs = now;
+            }, 1000);
+
+            function formatMem(bytes){
+                if (!bytes && bytes !== 0) return 'N/A';
+                const mb = bytes / (1024*1024);
+                return `${mb.toFixed(1)}MB`;
+            }
+
+            function updateResource(){
+                if (!resourceDiv) return;
+                const lines = [];
+                const hc = navigator.hardwareConcurrency || 'N/A';
+                lines.push(`cores: ${hc}`);
+
+                const pm = performance && performance.memory ? performance.memory : null;
+                if (pm){
+                    lines.push(`heap: ${formatMem(pm.usedJSHeapSize)} / ${formatMem(pm.totalJSHeapSize)}`);
+                } else {
+                    lines.push(`heap: N/A`);
+                }
+
+                const vw = videoEl.videoWidth || 0;
+                const vh = videoEl.videoHeight || 0;
+                let totalFrames = null, droppedFrames = null, corruptedFrames = null;
+                try{
+                    if (typeof videoEl.getVideoPlaybackQuality === 'function'){
+                        const q = videoEl.getVideoPlaybackQuality();
+                        totalFrames = q.totalVideoFrames || null;
+                        droppedFrames = q.droppedVideoFrames || null;
+                        corruptedFrames = q.corruptedVideoFrames || null;
+                    } else {
+                        totalFrames = videoEl.webkitDecodedFrameCount || videoEl.mozPaintedFrames || null;
+                        droppedFrames = videoEl.webkitDroppedFrameCount || null;
+                    }
+                }catch(e){}
+
+                let fpsStr = 'N/A';
+                const ts = performance.now();
+                if (totalFrames != null){
+                    if (lastTotalFrames != null && lastCheckTs != null){
+                        const df = totalFrames - lastTotalFrames;
+                        const dt = (ts - lastCheckTs) / 1000;
+                        if (dt > 0) fpsStr = (df / dt).toFixed(1);
+                    }
+                    lastTotalFrames = totalFrames;
+                    lastCheckTs = ts;
+                }
+
+                lines.push(`video: ${vw}x${vh} @ ${fpsStr}fps`);
+                if (droppedFrames != null){
+                    lines.push(`dropped: ${droppedFrames}${corruptedFrames!=null?`, corrupt: ${corruptedFrames}`:''}`);
+                }
+                
+                // 从全局 webrtc stats 同步码率、RTT、可用带宽
+                const ws = window.__webrtcStats || {};
+                const vkbps = ws.videoKbps != null ? ws.videoKbps + 'kbps' : 'N/A';
+                const akbps = ws.audioKbps != null ? ws.audioKbps + 'kbps' : 'N/A';
+                const rtt = ws.rttMs != null ? ws.rttMs + 'ms' : 'N/A';
+                const aob = ws.availOutKbps != null ? ws.availOutKbps + 'kbps' : 'N/A';
+                lines.push(`bitrate(v/a): ${vkbps}/${akbps}  rtt: ${rtt}  availOut: ${aob}`);
+                // 判断当 videoKbps 小于 1000 时，每1分钟记录一次并永久展示
+                if (typeof ws.videoKbps === 'number' && ws.videoKbps < 1000) {
+                    const nowMs = Date.now();
+                    if (nowMs - lastWarnAt >= 60 * 1000) {
+                        const nowStr = new Date().toLocaleString();
+                        persistentWarnings.push(`[${nowStr}]  ${ws.videoKbps}kbps`);
+                        lastWarnAt = nowMs;
+                    }
+                }
+
+                // 将永久告警附加展示
+                if (persistentWarnings.length > 0) {
+                    lines.push('alerts:');
+                    for (const warn of persistentWarnings) {
+                        lines.push(`- ${warn}`);
+                    }
+                }
+
+                lines.push(`loopDelay: ${lastLoopDelay}ms  readyState: ${videoEl.readyState}`);
+
+                resourceDiv.textContent = lines.join('\n');
+            }
+
+            setInterval(updateResource, 2000);
+            updateResource();
+        })();
+
+    </script>
+</body>
+</html>
