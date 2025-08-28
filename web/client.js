@@ -325,7 +325,9 @@ function __initCanvasDrawer(){
         updateStream: updateStream,
         preloadStream: preloadStream,
         commitSwitch: commitSwitch,
-        resize: resizeCanvas
+        resize: resizeCanvas,
+        currentEl: function(){ return current; },
+        standbyEl: function(){ return standby; }
     };
     return __canvasDrawer;
 }
@@ -688,7 +690,47 @@ function __seamlessRestart(reason){
             __logSwitch('committing canvas switch after warm-up...');
             var drawer = __initCanvasDrawer();
             if (!drawer) throw new Error('Canvas drawer not ready');
-            return drawer.commitSwitch();
+            // return drawer.commitSwitch();
+            return drawer.commitSwitch().then(function(){
+                // If Android is showing the <video> element (canvas hidden), keep the visible element in sync
+                try{
+                    var isAndroid = /Android/i.test(navigator.userAgent);
+                    var canvas = document.getElementById('video-canvas');
+                    var usingVideoElement = isAndroid || (document.getElementById('debug-mode') && document.getElementById('debug-mode').checked);
+                    if (usingVideoElement && canvas && canvas.style.display === 'none'){
+                        var cur = drawer.currentEl && drawer.currentEl();
+                        var stb = drawer.standbyEl && drawer.standbyEl();
+                        if (cur && stb){
+                            // 确保 current 可播放再显示，避免黑屏
+                            var ensurePlay = function(v){ try{ v.load(); }catch(e){} try{ v.play().catch(function(){}); }catch(e){} };
+                            ensurePlay(cur);
+                            ensurePlay(stb);
+
+                            cur.style.display = 'block';
+                            cur.style.position = 'absolute';
+                            cur.style.top = '0';
+                            cur.style.left = '0';
+                            cur.style.width = '100%';
+                            cur.style.height = '100%';
+                            cur.style.opacity = '1';
+                            cur.style.visibility = 'visible';
+                            cur.style.pointerEvents = 'auto';
+                            cur.style.zIndex = '1';
+
+                            stb.style.display = 'block';
+                            stb.style.position = 'absolute';
+                            stb.style.top = '-9999px';
+                            stb.style.left = '-9999px';
+                            stb.style.width = '1px';
+                            stb.style.height = '1px';
+                            stb.style.opacity = '0';
+                            stb.style.visibility = 'hidden';
+                            stb.style.pointerEvents = 'none';
+                            stb.style.zIndex = '-1';
+                        }
+                    }
+                }catch(e){ console.warn('Android visible video toggle failed:', e); }
+            });
         });
     }).then(function(){
         // swap active pc
@@ -796,7 +838,16 @@ function start() {
                     console.error('[Android] Video error:', e);
                 });
                 
-                return; // 跳过Canvas处理
+                // 即便使用可见 <video>，也初始化画布切换管理器，以便无缝切换时能同步两个隐藏视频元素的流
+                try{
+                    var drawer = __initCanvasDrawer();
+                    if (drawer){
+                        drawer.start();
+                        drawer.updateStream(stream);
+                    }
+                }catch(e){ console.warn('Init canvas drawer for Android failed:', e); }
+
+                return; // 跳过后续仅Canvas路径的处理
             }
         }
         
