@@ -152,7 +152,7 @@ async def offer(request):
     is_android = 'Android' in user_agent
     logger.info(f'Client User-Agent: {user_agent}, Android: {is_android}')
 
-    # Limit video to a stable bitrate/framerate to avoid sharp oscillation on constrained devices
+    # Limit and floor video bitrate/framerate to reduce oscillation and ramp-up time
     try:
         params = video_sender.getParameters()
         if not getattr(params, "encodings", None):
@@ -160,18 +160,18 @@ async def offer(request):
             params.encodings = [{}]
         for enc in params.encodings:
             if is_android:
-                # 安卓设备使用更保守的编码参数
-                enc["maxBitrate"] = 2_000_000  # 2 Mbps cap for Android
+                # H264: 提高初始与上限码率，降低爬升期
+                enc["maxBitrate"] = 5_000_000  # 5 Mbps cap for Android
                 enc["maxFramerate"] = 24       # 24 fps for Android
                 enc["scaleResolutionDownBy"] = 1.0  # 禁止分辨率缩放
-                enc["minBitrate"] = 500_000    # 500 kbps floor for Android
-                logger.info('Applied Android-optimized video encoding parameters')
+                enc["minBitrate"] = 1_500_000  # 1.5 Mbps floor for Android
+                logger.info('Applied Android-optimized video encoding parameters (H264 high start)')
             else:
-                # 桌面设备使用标准参数
-                enc["maxBitrate"] = 6_000_000  # 6 Mbps cap
+                # 桌面设备提高初始与上限
+                enc["maxBitrate"] = 9_000_000  # 9 Mbps cap
                 enc["maxFramerate"] = 30       # allow 30 fps
                 enc["scaleResolutionDownBy"] = 1.0  # 禁止分辨率缩放
-                enc["minBitrate"] = 1_500_000  # 1.5 Mbps floor
+                enc["minBitrate"] = 3_000_000  # 3 Mbps floor
         # aiortc.setParameters might be sync depending on version
         maybe = video_sender.setParameters(params)
         if hasattr(maybe, "__await__"):
@@ -209,13 +209,20 @@ async def offer(request):
                     idx_end = i
                     break
 
-            # ensure b=TIAS in video section
+            # ensure b=TIAS/AS in video section（为 H264 提高初始目标）
             has_b = False
             for i in range(idx_m+1, idx_end):
                 if lines[i].startswith('b=TIAS:') or lines[i].startswith('b=AS:'):
-                    # 根据设备类型设置不同的带宽
-                    bandwidth = '5000000' if is_android else '6000000'  # 2Mbps for Android, 6Mbps for others
-                    lines[i] = f'b=TIAS:{bandwidth}'
+                    # 根据设备类型设置不同的带宽（更高起步）
+                    tias_bps = 5000000 if is_android else 9000000
+                    as_kbps = tias_bps // 1000
+                    # 覆盖 TIAS，并且紧随其后确保有 AS 行
+                    lines[i] = f'b=TIAS:{tias_bps}'
+                    # 检查下一行是否已有 AS，没有则插入
+                    insert_as_at = i + 1
+                    if insert_as_at < idx_end and not lines[insert_as_at].startswith('b=AS:'):
+                        lines.insert(insert_as_at, f'b=AS:{as_kbps}')
+                        idx_end += 1
                     has_b = True
                     break
             if not has_b:
@@ -225,8 +232,10 @@ async def offer(request):
                     if lines[i].startswith('c='):
                         insert_at = i + 1
                         break
-                bandwidth = '5000000' if is_android else '6000000'
-                lines.insert(insert_at, f'b=TIAS:{bandwidth}')
+                tias_bps = 5000000 if is_android else 9000000
+                as_kbps = tias_bps // 1000
+                lines.insert(insert_at, f'b=TIAS:{tias_bps}')
+                lines.insert(insert_at + 1, f'b=AS:{as_kbps}')
                 idx_end += 1
 
             # add x-google-* for VP8 payload types
@@ -252,9 +261,9 @@ async def offer(request):
                             if lines[i].startswith(f'a=rtpmap:{pt} '):
                                 insert_idx = i + 1
                         if is_android:
-                            lines.insert(insert_idx, f'a=fmtp:{pt} x-google-start-bitrate=1000;x-google-min-bitrate=500;x-google-max-bitrate=2000')
+                            lines.insert(insert_idx, f'a=fmtp:{pt} x-google-start-bitrate=2000;x-google-min-bitrate=1500;x-google-max-bitrate=3000')
                         else:
-                            lines.insert(insert_idx, f'a=fmtp:{pt} x-google-start-bitrate=3000;x-google-min-bitrate=1500;x-google-max-bitrate=6000')
+                            lines.insert(insert_idx, f'a=fmtp:{pt} x-google-start-bitrate=5000;x-google-min-bitrate=3000;x-google-max-bitrate=8000')
                         idx_end += 1
 
             return '\r\n'.join(lines)

@@ -534,8 +534,9 @@
                         </div>
                         <div class="video-container">
                             <canvas id="video-canvas"></canvas>
-                            <video id="video" autoplay playsinline muted disablePictureInPicture webkit-playsinline x5-playsinline x5-video-player-type="h5" x5-video-player-fullscreen="true" style="display: none;"></video>
-                            <video id="video-buffer" autoplay playsinline muted disablePictureInPicture webkit-playsinline x5-playsinline x5-video-player-type="h5" x5-video-player-fullscreen="true" style="display: none;"></video>
+                                <video id="video" autoplay playsinline  disablePictureInPicture webkit-playsinline x5-playsinline x5-video-player-type="h5" x5-video-player-fullscreen="true" style="display: none;"></video>
+                                <video id="video-buffer" autoplay playsinline  disablePictureInPicture webkit-playsinline x5-playsinline x5-video-player-type="h5" x5-video-player-fullscreen="true" style="display: none;"></video>
+                                <audio id="audio" autoplay="true" style="display: none;"></audio>
                             <button id="fullscreen-btn" class="btn btn-sm btn-outline-light position-absolute" style="top: 15px; left: 15px; z-index: 10;">
                                 <i class="bi bi-arrows-fullscreen"></i>
                             </button>
@@ -590,7 +591,7 @@
 
                                     </div>
                             </div>
-                            <div class="chat-container" style="display: none">
+                            <div class="chat-container" >
                                 <div class="chat-messages" id="chatMessages"></div>
                                 <div class="chat-input" style="display: none">
                                     <input type="text" id="chatInput" placeholder="输入消息...">
@@ -789,7 +790,7 @@
                                 video.setAttribute('x5-playsinline', 'true');
                                 video.setAttribute('x5-video-player-type', 'h5');
                                 video.setAttribute('x5-video-player-fullscreen', 'true');
-                                video.muted = false; // 取消静音以播放音频
+                                //video.muted = false; // 取消静音以播放音频
                                 video.playsInline = true;
                             });
                             

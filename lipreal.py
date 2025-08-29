@@ -167,6 +167,11 @@ def inference(quit_event,batch_size,face_list_cycle,audio_feat_queue,audio_out_q
                 img_batch.append(face)
             img_batch, mel_batch = np.asarray(img_batch), np.asarray(mel_batch)
 
+            # 只处理符合规则的数据，长度不一致则跳过本次
+            if len(mel_batch) != len(img_batch) or len(mel_batch) != batch_size:
+                logger.info(f"skip invalid batch: mel={len(mel_batch)}, img={len(img_batch)}, expected={batch_size}")
+                continue
+
             img_masked = img_batch.copy()
             img_masked[:, face.shape[0]//2:] = 0
 

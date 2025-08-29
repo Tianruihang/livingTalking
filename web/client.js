@@ -148,7 +148,7 @@ function __initCanvasDrawer(){
         
         try {
             // 清除Canvas
-            ctx.clearRect(0, 0, cw, ch);
+           // ctx.clearRect(0, 0, cw, ch);
             ctx.drawImage(current, dx, dy, dw, dh);
             
             // 安卓设备调试信息
@@ -168,7 +168,7 @@ function __initCanvasDrawer(){
         animationId = requestAnimationFrame(rafLoop);
         // 安卓设备降低帧率以减少主线程压力
         var now = performance.now();
-        var minInterval = isAndroid ? 50 : 33; // 安卓设备20fps，其他设备30fps
+        var minInterval = isAndroid ? 25 : 33; // 安卓设备25fps，其他设备30fps
         if (now - lastDrawTs < minInterval) return;
         lastDrawTs = now;
         drawFrame();
@@ -214,18 +214,24 @@ function __initCanvasDrawer(){
                 // 确保视频元素能够正常播放（即使被隐藏）
                 videoEl.style.display = 'block';
                 videoEl.style.position = 'absolute';
-                videoEl.style.top = '-9999px';
-                videoEl.style.left = '-9999px';
+                videoEl.style.top = '0';
+                videoEl.style.left = '0';
                 videoEl.style.width = '1px';
                 videoEl.style.height = '1px';
                 videoEl.style.opacity = '0';
-                videoEl.style.visibility = 'hidden';
+                videoEl.style.visibility = 'visible';
                 videoEl.style.pointerEvents = 'none';
                 videoEl.style.zIndex = '-1';
+
+                // autoplay/inline 安全设置，避免因策略导致暂停
+                try{ videoEl.muted = true; }catch(e){}
+                try{ videoEl.setAttribute && videoEl.setAttribute('muted', ''); }catch(e){}
+                try{ videoEl.playsInline = true; }catch(e){}
+                try{ videoEl.setAttribute && videoEl.setAttribute('playsinline', ''); }catch(e){}
+                try{ videoEl.autoplay = true; }catch(e){}
                 
                 // 安卓设备特殊处理
                 if (isAndroid) {
-                    videoEl.load(); // 强制重新加载
                     // 添加事件监听器来调试视频状态
                     videoEl.addEventListener('loadedmetadata', function() {
                         console.log('[Android] Video loadedmetadata:', videoEl.videoWidth, 'x', videoEl.videoHeight);
@@ -259,7 +265,6 @@ function __initCanvasDrawer(){
                 videoEl.srcObject = null; 
                 videoEl.srcObject = stream; 
                 if (isAndroid) {
-                    videoEl.load();
                     videoEl.play().catch(function(e) {
                         console.warn('[Android] Video play retry failed:', e);
                     });
@@ -587,8 +592,24 @@ function __buildPeerConnection(config, onVideoTrack, attachAudio){
     thePc.addEventListener('track', function(evt){
         if (evt.track.kind === 'video'){
             if (typeof onVideoTrack === 'function') onVideoTrack(evt.streams[0]);
-        } else if (attachAudio !== false) {
-            try{ var a = document.getElementById('audio'); if (a) a.srcObject = evt.streams[0]; }catch(e){}
+        } else if (evt.track.kind === 'audio' && attachAudio !== false) {
+            // 音频轨道：确保视频元素能够播放音频
+            try{ 
+                var video = document.getElementById('video');
+                if (video && video.srcObject) {
+                    // 如果视频元素已经有流，添加音频轨道到现有流
+                    var currentStream = video.srcObject;
+                    if (currentStream.getAudioTracks().length === 0) {
+                        currentStream.addTrack(evt.track);
+                        console.log('[Audio] Audio track added to video stream');
+                    }
+                }
+                // 同时也设置到audio元素作为备用
+                var a = document.getElementById('audio'); 
+                if (a) a.srcObject = evt.streams[0];
+            }catch(e){
+                console.warn('Audio track handling failed:', e);
+            }
         }
     });
     
@@ -701,32 +722,72 @@ function __seamlessRestart(reason){
                         var cur = drawer.currentEl && drawer.currentEl();
                         var stb = drawer.standbyEl && drawer.standbyEl();
                         if (cur && stb){
-                            // 确保 current 可播放再显示，避免黑屏
-                            var ensurePlay = function(v){ try{ v.load(); }catch(e){} try{ v.play().catch(function(){}); }catch(e){} };
-                            ensurePlay(cur);
-                            ensurePlay(stb);
+                            // 关键：同步音频流到 audio 元素，避免切换后无声
+                            try{
+                                var audioEl = document.getElementById('audio');
+                                if (audioEl && cur.srcObject && cur.srcObject.getAudioTracks && cur.srcObject.getAudioTracks().length > 0){
+                                    audioEl.srcObject = cur.srcObject;
+                                    try{ audioEl.muted = false; audioEl.volume = 1.0; }catch(_e){}
+                                }
+                            }catch(_e){ console.warn('Sync audio stream failed:', _e); }
 
-                            cur.style.display = 'block';
-                            cur.style.position = 'absolute';
-                            cur.style.top = '0';
-                            cur.style.left = '0';
-                            cur.style.width = '100%';
-                            cur.style.height = '100%';
-                            cur.style.opacity = '1';
-                            cur.style.visibility = 'visible';
-                            cur.style.pointerEvents = 'auto';
-                            cur.style.zIndex = '1';
+                            // 确保 current 拥有可用帧后再显示，避免闪屏/黑屏
+                            var ensurePlayNoLoad = function(v){ try{ if (!v) return; v.muted = false; v.playsInline = true; v.autoplay = true; if (v.paused) v.play().catch(function(){}); }catch(e){} };
+                            ensurePlayNoLoad(cur);
+                            ensurePlayNoLoad(stb);
 
-                            stb.style.display = 'block';
-                            stb.style.position = 'absolute';
-                            stb.style.top = '-9999px';
-                            stb.style.left = '-9999px';
-                            stb.style.width = '1px';
-                            stb.style.height = '1px';
-                            stb.style.opacity = '0';
-                            stb.style.visibility = 'hidden';
-                            stb.style.pointerEvents = 'none';
-                            stb.style.zIndex = '-1';
+                            var reveal = function(){
+                                // 在曝光前，用当前隐藏视频帧预绘到 canvas，避免首帧黑屏/闪屏
+                                try {
+                                    var c = canvas; // 上文已获取到的 video-canvas
+                                    if (c && c.getContext && cur && cur.videoWidth > 0 && cur.videoHeight > 0) {
+                                        var ctx2 = c.getContext('2d');
+                                        var vw = cur.videoWidth, vh = cur.videoHeight;
+                                        var cw = c.width, ch = c.height;
+                                        var s = Math.max(cw / vw, ch / vh);
+                                        var dw = vw * s, dh = vh * s;
+                                        var dx = (cw - dw) / 2, dy = (ch - dh) / 2;
+                                        ctx2.drawImage(cur, dx, dy, dw, dh);
+                                    }
+                                } catch(_e) {}
+
+                                cur.style.display = 'block';
+                                cur.style.position = 'absolute';
+                                cur.style.top = '0';
+                                cur.style.left = '0';
+                                cur.style.width = '100%';
+                                cur.style.height = '100%';
+                                cur.style.opacity = '1';
+                                cur.style.visibility = 'visible';
+                                cur.style.pointerEvents = 'auto';
+                                cur.style.zIndex = '1';
+
+                                stb.style.display = 'block';
+                                stb.style.position = 'absolute';
+                                stb.style.top = '-9999px';
+                                stb.style.left = '-9999px';
+                                stb.style.width = '1px';
+                                stb.style.height = '1px';
+                                stb.style.opacity = '0';
+                                stb.style.visibility = 'hidden';
+                                stb.style.pointerEvents = 'none';
+                                stb.style.zIndex = '-1';
+                            };
+
+                            var hasFrame = function(v){
+                                return v && v.readyState >= 2 && v.videoWidth > 0 && v.videoHeight > 0 && v.currentTime > 0;
+                            };
+
+                            if (hasFrame(cur)){
+                                reveal();
+                            } else {
+                                var done = false;
+                                var tryReveal = function(){ if (done) return; if (hasFrame(cur)) { done = true; reveal(); } };
+                                cur.addEventListener('playing', tryReveal, { once: true });
+                                cur.addEventListener('loadeddata', tryReveal, { once: true });
+                                // 兜底：最晚在200ms后尝试显示，降低等待过久导致的停顿
+                                setTimeout(tryReveal, 200);
+                            }
                         }
                     }
                 }catch(e){ console.warn('Android visible video toggle failed:', e); }
@@ -739,6 +800,22 @@ function __seamlessRestart(reason){
         try{ if (pc) pc.close(); }catch(e){}
         pc = pcBackup;
         pcBackup = null;
+        
+        // 关键：确保音频流在新PC上正常工作
+        try{
+            var audioEl = document.getElementById('audio');
+            if (audioEl && pc && pc.getReceivers){
+                var receivers = pc.getReceivers();
+                var audioReceiver = receivers.find(function(r){ return r.track && r.track.kind === 'audio'; });
+                if (audioReceiver && audioReceiver.track){
+                    var audioStream = new MediaStream([audioReceiver.track]);
+                    audioEl.srcObject = audioStream;
+                    try{ audioEl.muted = false; audioEl.volume = 1.0; }catch(_e){}
+                    console.log('[Audio] Audio stream reattached after PC swap');
+                }
+            }
+        }catch(_e){ console.warn('Audio reattachment after PC swap failed:', _e); }
+        
         __stopStatsMonitor();
         __startStatsMonitor();
         __logSwitch('seamless restart done.');
@@ -813,10 +890,14 @@ function start() {
                 video.style.opacity = '1';
                 video.style.visibility = 'visible';
                 video.style.pointerEvents = 'auto';
+                try{ video.muted = false; }catch(e){}
+                try{ video.setAttribute && video.setAttribute('muted', 'false'); }catch(e){}
+                try{ video.playsInline = true; }catch(e){}
+                try{ video.setAttribute && video.setAttribute('playsinline', ''); }catch(e){}
+                try{ video.autoplay = true; }catch(e){}
                 
                 console.log('[Debug] Setting video stream to video element');
                 video.srcObject = stream;
-                video.load();
                 video.play().catch(function(e) {
                     console.warn('[Android] Video play failed:', e);
                 });
@@ -838,6 +919,16 @@ function start() {
                     console.error('[Android] Video error:', e);
                 });
                 
+                // 关键：确保音频元素获得音频流
+                try{
+                    var audioEl = document.getElementById('audio');
+                    if (audioEl && stream.getAudioTracks && stream.getAudioTracks().length > 0){
+                        audioEl.srcObject = stream;
+                        try{ audioEl.muted = false; audioEl.volume = 1.0; }catch(_e){}
+                        console.log('[Android] Audio stream attached to audio element');
+                    }
+                }catch(_e){ console.warn('Android audio attachment failed:', _e); }
+
                 // 即便使用可见 <video>，也初始化画布切换管理器，以便无缝切换时能同步两个隐藏视频元素的流
                 try{
                     var drawer = __initCanvasDrawer();
@@ -869,7 +960,11 @@ function start() {
                 // 安卓设备特殊处理
                 if (isAndroid) {
                     console.log('[Android] Setting video stream...');
-                    video.load();
+                    try{ video.muted = false; }catch(e){}
+                    try{ video.setAttribute && video.setAttribute('muted', 'false'); }catch(e){}
+                    try{ video.playsInline = true; }catch(e){}
+                    try{ video.setAttribute && video.setAttribute('playsinline', ''); }catch(e){}
+                    try{ video.autoplay = true; }catch(e){}
                     video.play().catch(function(e) {
                         console.warn('[Android] Video play failed:', e);
                     });
@@ -891,6 +986,16 @@ function start() {
         }catch(e){
             console.error('Failed to set video srcObject:', e);
         }
+        
+        // 关键：确保音频元素获得音频流（Canvas模式）
+        try{
+            var audioEl = document.getElementById('audio');
+            if (audioEl && stream.getAudioTracks && stream.getAudioTracks().length > 0){
+                audioEl.srcObject = stream;
+                try{ audioEl.muted = false; audioEl.volume = 1.0; }catch(_e){}
+                console.log('[Canvas] Audio stream attached to audio element');
+            }
+        }catch(_e){ console.warn('Canvas audio attachment failed:', _e); }
     }, true);
 
     document.getElementById('start').style.display = 'none';
@@ -932,6 +1037,16 @@ function start() {
     if (isAndroid) {
         console.log('[Android] Fallback mode enabled');
     }
+    
+    // 5秒后主动切换一次WebRTC来预热视频
+    setTimeout(function() {
+        console.log('[Warmup] Starting proactive WebRTC switch for video warmup...');
+        if (!__restartInProgress && pc && pc.connectionState === 'connected') {
+            __seamlessRestart('warmup');
+        } else {
+            console.log('[Warmup] Skipping warmup - restart in progress or connection not ready');
+        }
+    }, 5000);
 }
 
 function stop() {
