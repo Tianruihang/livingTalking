@@ -837,7 +837,19 @@
                 }
                 
                 var btn = document.getElementById("start");
-                if (btn) btn.click();
+                // 刷新后先释放所有连接，再开始连接
+                try {
+                    fetch('/stop_stream', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({})
+                    })
+                    .catch(function(e){ console.warn('stop_stream failed:', e); })
+                    .finally(function(){ if (btn) btn.click(); });
+                } catch(e) {
+                    console.warn('stop_stream exception:', e);
+                    if (btn) btn.click();
+                }
                 //获取麦克风
                 var markBtn = document.getElementById("mark");
                 if (markBtn) markBtn.click();

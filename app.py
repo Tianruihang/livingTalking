@@ -35,6 +35,8 @@ app = Flask(__name__)
 nerfreals:Dict[int, BaseReal] = {} #sessionid:BaseReal
 # 记录每个 sessionid 对应的 RTCPeerConnection 数量，用于安全回收资源
 session_pc_counts:Dict[int, int] = {}
+# 跟踪每个 sessionid 关联的 RTCPeerConnection（便于主动断开推送）
+session_pcs:Dict[int, set] = {}
 opt = None
 model = None
 avatar = None
@@ -97,6 +99,10 @@ async def offer(request):
 
     # 增加该 session 的 RTCPeerConnection 引用计数
     session_pc_counts[sessionid] = session_pc_counts.get(sessionid, 0) + 1
+    # 记录该 session 的 pc
+    if sessionid not in session_pcs:
+        session_pcs[sessionid] = set()
+    session_pcs[sessionid].add(pc)
 
     @pc.on("connectionstatechange")
     async def on_connectionstatechange():
@@ -109,12 +115,26 @@ async def offer(request):
             if session_pc_counts[sessionid] <= 0:
                 nerfreals.pop(sessionid, None)
                 session_pc_counts.pop(sessionid, None)
+            # 从 session 映射中移除该 pc
+            try:
+                session_pcs.get(sessionid, set()).discard(pc)
+                if not session_pcs.get(sessionid):
+                    session_pcs.pop(sessionid, None)
+            except Exception:
+                pass
         if pc.connectionState == "closed":
             pcs.discard(pc)
             session_pc_counts[sessionid] = session_pc_counts.get(sessionid, 1) - 1
             if session_pc_counts[sessionid] <= 0:
                 nerfreals.pop(sessionid, None)
                 session_pc_counts.pop(sessionid, None)
+            # 从 session 映射中移除该 pc
+            try:
+                session_pcs.get(sessionid, set()).discard(pc)
+                if not session_pcs.get(sessionid):
+                    session_pcs.pop(sessionid, None)
+            except Exception:
+                pass
 
     # 检查 sessionid 是否存在
     if sessionid not in nerfreals:
@@ -463,11 +483,74 @@ async def is_speaking(request):
         )
 
 
+async def stop_stream(request):
+    try:
+        params = await request.json()
+        sessionid = params.get('sessionid', 0)
+
+        # 未传 sessionid 或为 0/None 时，默认断开所有推送
+        if not sessionid:
+            close_tasks = []
+            for pc in list(pcs):
+                try:
+                    close_tasks.append(pc.close())
+                except Exception:
+                    pass
+            if close_tasks:
+                await asyncio.gather(*close_tasks, return_exceptions=True)
+            pcs.clear()
+            session_pcs.clear()
+            session_pc_counts.clear()
+            return web.Response(
+                content_type="application/json",
+                text=json.dumps({"code": 0, "data": "stopped_all"}),
+            )
+
+        # 只断开指定 session 的推送
+        if sessionid not in nerfreals and sessionid not in session_pcs:
+            return web.Response(
+                content_type="application/json",
+                text=json.dumps(
+                    {"code": -1, "msg": "Session not found", "data": "Session ID does not exist"}
+                ),
+            )
+
+        close_tasks = []
+        for pc in list(session_pcs.get(sessionid, set())):
+            try:
+                close_tasks.append(pc.close())
+                pcs.discard(pc)
+            except Exception:
+                pass
+        if close_tasks:
+            await asyncio.gather(*close_tasks, return_exceptions=True)
+
+        # 清理 session 的 pc 记录与计数，但保留 nerfreals 以便复用
+        try:
+            session_pcs.pop(sessionid, None)
+        except Exception:
+            pass
+        if sessionid in session_pc_counts:
+            session_pc_counts.pop(sessionid, None)
+
+        return web.Response(
+            content_type="application/json",
+            text=json.dumps({"code": 0, "data": "stopped"}),
+        )
+    except Exception as e:
+        logger.error(f"Error in stop_stream function: {e}")
+        return web.Response(
+            content_type="application/json",
+            text=json.dumps({"code": -1, "msg": "Internal error", "data": str(e)}),
+        )
+
+
 async def on_shutdown(app):
     # close peer connections
     coros = [pc.close() for pc in pcs]
     await asyncio.gather(*coros)
     pcs.clear()
+    session_pcs.clear()
 
 async def post(url,data):
     try:
@@ -484,6 +567,10 @@ async def run(push_url,sessionid):
 
         pc = RTCPeerConnection()
         pcs.add(pc)
+        # 记录该 session 的 pc
+        if sessionid not in session_pcs:
+            session_pcs[sessionid] = set()
+        session_pcs[sessionid].add(pc)
 
         @pc.on("connectionstatechange")
         async def on_connectionstatechange():
@@ -491,6 +578,12 @@ async def run(push_url,sessionid):
             if pc.connectionState == "failed":
                 await pc.close()
                 pcs.discard(pc)
+                try:
+                    session_pcs.get(sessionid, set()).discard(pc)
+                    if not session_pcs.get(sessionid):
+                        session_pcs.pop(sessionid, None)
+                except Exception:
+                    pass
 
         # 检查 sessionid 是否存在
         if sessionid not in nerfreals:
@@ -602,6 +695,7 @@ if __name__ == '__main__':
     appasync.router.add_post("/set_audiotype", set_audiotype)
     appasync.router.add_post("/record", record)
     appasync.router.add_post("/is_speaking", is_speaking)
+    appasync.router.add_post("/stop_stream", stop_stream)
     appasync.router.add_static('/',path='web')
 
     # Configure default CORS settings.
