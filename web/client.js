@@ -571,7 +571,10 @@ function negotiateFor(targetPc, options){
         if (answer.type !== 'answer') answer.type = 'answer';
         try{ targetPc.__sessionid = answer.sessionid; }catch(e){}
         if (updateSessionId){
-            try{ document.getElementById('sessionid').value = answer.sessionid; }catch(e){}
+            try{ 
+                document.getElementById('sessionid').value = answer.sessionid; 
+                try { window.dispatchEvent(new CustomEvent('session-ready', { detail: { sessionid: answer.sessionid } })); } catch(_e) {}
+            }catch(e){}
         }
         
         console.log('[WebRTC] Setting remote description');
@@ -796,7 +799,10 @@ function __seamlessRestart(reason){
     }).then(function(){
         // swap active pc
         __logSwitch('canvas switched to backup stream, swapping PeerConnection');
-        try{ document.getElementById('sessionid').value = pcBackup.__sessionid; }catch(e){}
+        try{ 
+            document.getElementById('sessionid').value = pcBackup.__sessionid; 
+            try { window.dispatchEvent(new CustomEvent('session-ready', { detail: { sessionid: pcBackup.__sessionid } })); } catch(_e) {}
+        }catch(e){}
         try{ if (pc) pc.close(); }catch(e){}
         pc = pcBackup;
         pcBackup = null;

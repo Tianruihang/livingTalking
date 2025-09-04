@@ -29,10 +29,18 @@ import torch
 from typing import Dict
 from logger import logger
 from redis_global import redis_manager
+from gpu_pool import GPUPool
+from model_registry import Wav2LipRegistry
 
 app = Flask(__name__)
 #sockets = Sockets(app)
 nerfreals:Dict[int, BaseReal] = {} #sessionid:BaseReal
+# GPU pooling & model registry
+session_gpu:Dict[int, int] = {}
+gpu_pool:GPUPool = None
+wav2lip_registry:Wav2LipRegistry = None
+# Shared players per session to avoid multiple rendering threads
+session_players:Dict[int, 'HumanPlayer'] = {}
 # 记录每个 sessionid 对应的 RTCPeerConnection 数量，用于安全回收资源
 session_pc_counts:Dict[int, int] = {}
 # 跟踪每个 sessionid 关联的 RTCPeerConnection（便于主动断开推送）
@@ -55,7 +63,14 @@ def build_nerfreal(sessionid:int)->BaseReal:
     opt.sessionid=sessionid
     if opt.model == 'wav2lip':
         from lipreal import LipReal
-        nerfreal = LipReal(opt,model,avatar)
+        # Acquire GPU for the session if pool exists
+        gi = gpu_pool.acquire(owner_id=f"session:{sessionid}") if gpu_pool is not None else -9999
+        session_gpu[sessionid] = gi
+        try:
+            session_model = wav2lip_registry.get(gi) if (wav2lip_registry is not None and gi != -9999) else model
+        except Exception:
+            session_model = model
+        nerfreal = LipReal(opt,session_model,avatar)
     elif opt.model == 'musetalk':
         from musereal import MuseReal
         nerfreal = MuseReal(opt,model,avatar)
@@ -76,23 +91,38 @@ async def offer(request):
     reuse_sessionid = params.get("sessionid")
     sessionid = None
 
-    if reuse_sessionid is not None and isinstance(reuse_sessionid, int) and reuse_sessionid in nerfreals:
+    # accept string/int sessionid
+    if reuse_sessionid is not None:
+        try:
+            reuse_sessionid = int(reuse_sessionid)
+        except Exception:
+            reuse_sessionid = None
+
+    if reuse_sessionid is not None and reuse_sessionid in nerfreals:
         sessionid = reuse_sessionid
         logger.info('reuse sessionid=%d for handoff', sessionid)
     else:
         # 新建会话前检查上限
         if len(nerfreals) >= opt.max_session:
-            logger.info('reach max session')
-            return web.Response(
-                status=429,
-                content_type="application/json",
-                text=json.dumps({"code": -1, "msg": "reach max session"})
-            )
-        sessionid = randN(6)
-        logger.info('sessionid=%d', sessionid)
-        nerfreals[sessionid] = None
-        nerfreal = await asyncio.get_event_loop().run_in_executor(None, build_nerfreal, sessionid)
-        nerfreals[sessionid] = nerfreal
+            # 当达到上限时，复用当前最空闲的会话（连接数最少）
+            logger.info('reach max session, reuse least-loaded session')
+            # 构建 (sid, load) 列表；没有计数的认为0
+            if nerfreals:
+                least_sid = min(nerfreals.keys(), key=lambda sid: session_pc_counts.get(sid, 0))
+                sessionid = least_sid
+                logger.info('reuse sessionid=%d (least-loaded)', sessionid)
+            else:
+                return web.Response(
+                    status=429,
+                    content_type="application/json",
+                    text=json.dumps({"code": -1, "msg": "reach max session"})
+                )
+        else:
+            sessionid = randN(6)
+            logger.info('sessionid=%d', sessionid)
+            nerfreals[sessionid] = None
+            nerfreal = await asyncio.get_event_loop().run_in_executor(None, build_nerfreal, sessionid)
+            nerfreals[sessionid] = nerfreal
     
     pc = RTCPeerConnection()
     pcs.add(pc)
@@ -110,11 +140,25 @@ async def offer(request):
         if pc.connectionState == "failed":
             await pc.close()
             pcs.discard(pc)
+            # Clean up video track
+            try:
+                player.remove_video_track(video_track)
+            except Exception:
+                pass
             # 关闭时减少引用计数，计数为0再释放资源
             session_pc_counts[sessionid] = session_pc_counts.get(sessionid, 1) - 1
             if session_pc_counts[sessionid] <= 0:
                 nerfreals.pop(sessionid, None)
                 session_pc_counts.pop(sessionid, None)
+                # Clean up shared player
+                session_players.pop(sessionid, None)
+                # release GPU if allocated
+                gi = session_gpu.pop(sessionid, None)
+                if gi is not None and gpu_pool is not None and gi != -9999:
+                    try:
+                        gpu_pool.release(gi)
+                    except Exception:
+                        pass
             # 从 session 映射中移除该 pc
             try:
                 session_pcs.get(sessionid, set()).discard(pc)
@@ -124,10 +168,23 @@ async def offer(request):
                 pass
         if pc.connectionState == "closed":
             pcs.discard(pc)
+            # Clean up video track
+            try:
+                player.remove_video_track(video_track)
+            except Exception:
+                pass
             session_pc_counts[sessionid] = session_pc_counts.get(sessionid, 1) - 1
             if session_pc_counts[sessionid] <= 0:
                 nerfreals.pop(sessionid, None)
                 session_pc_counts.pop(sessionid, None)
+                # Clean up shared player
+                session_players.pop(sessionid, None)
+                gi = session_gpu.pop(sessionid, None)
+                if gi is not None and gpu_pool is not None and gi != -9999:
+                    try:
+                        gpu_pool.release(gi)
+                    except Exception:
+                        pass
             # 从 session 映射中移除该 pc
             try:
                 session_pcs.get(sessionid, set()).discard(pc)
@@ -145,20 +202,40 @@ async def offer(request):
         except Exception:
             pass
         pcs.discard(pc)
+        # Clean up video track if it was created
+        try:
+            if 'video_track' in locals():
+                player.remove_video_track(video_track)
+        except Exception:
+            pass
         # 回收计数
         session_pc_counts[sessionid] = session_pc_counts.get(sessionid, 1) - 1
         if session_pc_counts.get(sessionid, 0) <= 0:
             session_pc_counts.pop(sessionid, None)
             nerfreals.pop(sessionid, None)
+            # Clean up shared player
+            session_players.pop(sessionid, None)
+            gi = session_gpu.pop(sessionid, None)
+            if gi is not None and gpu_pool is not None and gi != -9999:
+                try:
+                    gpu_pool.release(gi)
+                except Exception:
+                    pass
         return web.Response(
             status=500,
             content_type="application/json",
             text=json.dumps({"code": -1, "msg": "Session creation failed"})
         )
 
-    player = HumanPlayer(nerfreals[sessionid])
+    # Each session gets its own player to ensure independent video generation
+    if sessionid not in session_players:
+        session_players[sessionid] = HumanPlayer(nerfreals[sessionid])
+    
+    player = session_players[sessionid]
     audio_sender = pc.addTrack(player.audio)
-    video_sender = pc.addTrack(player.video)
+    # Create a new video track for this connection to avoid frame sharing
+    video_track = player.create_video_track()
+    video_sender = pc.addTrack(video_track)
     capabilities = RTCRtpSender.getCapabilities("video")
     preferences = list(filter(lambda x: x.name == "H264", capabilities.codecs))
     preferences += list(filter(lambda x: x.name == "VP8", capabilities.codecs))
@@ -301,6 +378,21 @@ async def offer(request):
             {"sdp": final_sdp, "type": pc.localDescription.type, "sessionid":sessionid}
         ),
     )
+
+async def gpu_status(request):
+    # Get connection counts per session
+    session_connections = {}
+    for sid, pcs in session_pcs.items():
+        session_connections[sid] = len(pcs)
+    
+    data = {
+        "pool": gpu_pool.status() if gpu_pool is not None else {},
+        "session_gpu": session_gpu,
+        "active_sessions": list(nerfreals.keys()),
+        "session_connections": session_connections,
+        "session_players": {sid: len(player._HumanPlayer__video_tracks) for sid, player in session_players.items()},
+    }
+    return web.Response(content_type="application/json", text=json.dumps(data))
 
 async def human(request):
     try:
@@ -501,6 +593,17 @@ async def stop_stream(request):
             pcs.clear()
             session_pcs.clear()
             session_pc_counts.clear()
+            # release all GPUs and players
+            if gpu_pool is not None:
+                for sid, gi in list(session_gpu.items()):
+                    try:
+                        if gi != -9999:
+                            gpu_pool.release(gi)
+                    except Exception:
+                        pass
+                    session_gpu.pop(sid, None)
+            # Clean up all shared players
+            session_players.clear()
             return web.Response(
                 content_type="application/json",
                 text=json.dumps({"code": 0, "data": "stopped_all"}),
@@ -646,7 +749,7 @@ if __name__ == '__main__':
     parser.add_argument('--transport', type=str, default='rtcpush') #rtmp webrtc rtcpush
     parser.add_argument('--push_url', type=str, default='http://localhost:1985/rtc/v1/whip/?app=live&stream=livestream') #rtmp://localhost/live/livestream
 
-    parser.add_argument('--max_session', type=int, default=1)  #multi session count
+    parser.add_argument('--max_session', type=int, default=4)  #multi session count
     parser.add_argument('--listenport', type=int, default=8010, help="web listen port")
 
     opt = parser.parse_args()
@@ -696,6 +799,7 @@ if __name__ == '__main__':
     appasync.router.add_post("/record", record)
     appasync.router.add_post("/is_speaking", is_speaking)
     appasync.router.add_post("/stop_stream", stop_stream)
+    appasync.router.add_get("/gpu/status", gpu_status)
     appasync.router.add_static('/',path='web')
 
     # Configure default CORS settings.
@@ -720,6 +824,10 @@ if __name__ == '__main__':
     def run_server(runner):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        # init GPU pool & wav2lip registry
+        global gpu_pool, wav2lip_registry
+        gpu_pool = GPUPool()
+        wav2lip_registry = Wav2LipRegistry("./models/wav2lip.pth")
         loop.run_until_complete(runner.setup())
         site = web.TCPSite(runner, '0.0.0.0', opt.listenport)
         loop.run_until_complete(site.start())

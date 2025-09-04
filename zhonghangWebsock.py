@@ -28,12 +28,12 @@ def handle_connect():
 def api_push():
     data = request.get_json()
     text = data.get('text')
-
+    sessionId = data.get('sessionId','')
     if not text:
         return jsonify({'success': False, 'error': '缺少 text 参数'}), 400
 
     # 通过 WebSocket 推送到所有连接的客户端
-    socketio.emit('message', {'text': text})
+    socketio.emit('message', {'text': text,'sessionId':sessionId})
     return jsonify({'success': True, 'text': text})
 
 REDIS_WAITING_KEYS="ceyan:questionWaiting:python"

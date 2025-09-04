@@ -3,7 +3,7 @@ window.ConnectionManagerConfig = {
     // 定期重启配置
     periodicRestart: {
         enabled: true,
-        interval: 60000,        // 重启间隔 (1分钟)
+        interval: 3600000,        // 重启间隔 (1小时)
         maxAttempts: 3,          // 最大重启次数
         minInterval: 60000       // 最小重启间隔 (1分钟)
     },

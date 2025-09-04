@@ -838,21 +838,22 @@
                 
                 var btn = document.getElementById("start");
                 // 刷新后先释放所有连接，再开始连接
-                try {
-                    fetch('/stop_stream', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({})
-                    })
-                    .catch(function(e){ console.warn('stop_stream failed:', e); })
-                    .finally(function(){ if (btn) btn.click(); });
-                } catch(e) {
-                    console.warn('stop_stream exception:', e);
-                    if (btn) btn.click();
-                }
+                // try {
+                //     fetch('/stop_stream', {
+                //         method: 'POST',
+                //         headers: { 'Content-Type': 'application/json' },
+                //         body: JSON.stringify({})
+                //     })
+                //     .catch(function(e){ console.warn('stop_stream failed:', e); })
+                //     .finally(function(){ if (btn) btn.click(); });
+                // } catch(e) {
+                //     console.warn('stop_stream exception:', e);
+                //     if (btn) btn.click();
+                // }
+                if (btn) btn.click();
                 //获取麦克风
-                var markBtn = document.getElementById("mark");
-                if (markBtn) markBtn.click();
+                //var markBtn = document.getElementById("mark");
+                //if (markBtn) markBtn.click();
                 //$('#fullscreen-btn').click
 
               }, 4000); // 4 秒后触发
@@ -910,6 +911,12 @@
                     // console.log('停止可视化');
                     $('#visualizer').hide();
                 } else {
+                    //判断data中的sessionId是否匹配,匹配则展示,否则不处理
+                    console.log('收到消息 sessionId:', document.getElementById('sessionid').value);
+                    if ( data.sessionId !== (""+document.getElementById('sessionid').value)) {
+                        console.log('收到不匹配的sessionId消息，忽略:', data);
+                        return;
+                    }
                     addChatMessage(data.text, 'system');  // 使用你已有的函数显示到右侧聊天框
                     sendMessage(data.text,'user');  // 发送到视频流
                         //调用human
@@ -1108,7 +1115,25 @@
                 start();
                 $(this).hide();
                 $('#stop').show();
-
+                // 会话就绪后打印 sessionId 并触发麦克风
+                try {
+                    var __onSessionReadyOnce = function(){
+                        try {
+                            console.log('==============sessionId is', document.getElementById('sessionid').value);
+                            var markBtn = document.getElementById('mark');
+                            if (markBtn) markBtn.click();
+                        } catch(_e) {}
+                        try { window.removeEventListener('session-ready', __onSessionReadyOnce); } catch(__e) {}
+                    };
+                    window.addEventListener('session-ready', __onSessionReadyOnce);
+                    // 若监听前已就绪则立即执行
+                    try {
+                        var __curSid = document.getElementById('sessionid').value;
+                        if (__curSid && __curSid !== '0') {
+                            __onSessionReadyOnce();
+                        }
+                    } catch(__e2) {}
+                } catch(__e) {}
                 // 添加定时器检查视频流是否已加载
                 let connectionCheckTimer = setInterval(function() {
                     const video = document.getElementById('video');
@@ -1126,7 +1151,6 @@
                     }
                 }, 60000);
             });
-
             $('#stop').click(function() {
                 stop();
                 $(this).hide();
@@ -1192,8 +1216,11 @@
 
                     audioWS.onopen = () => {
                         console.log("🔗 语音 WebSocket 已连接");
+                        const sessionId = parseInt(document.getElementById('sessionid').value);
+                        console.log('sessionId for audioWS:', sessionId);
                         audioWS.send(JSON.stringify({
                             type: "meta",
+                            sessionId,                       // 新增
                             sampleRate: audioContext.sampleRate
                         }));
                     };

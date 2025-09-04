@@ -89,8 +89,9 @@ def load_avatar(avatar_id):
 def warm_up(batch_size,model,modelres):
     # 预热函数
     logger.info('warmup model...')
-    img_batch = torch.ones(batch_size, 6, modelres, modelres).to(device)
-    mel_batch = torch.ones(batch_size, 1, 80, 16).to(device)
+    model_device = next(model.parameters()).device
+    img_batch = torch.ones(batch_size, 6, modelres, modelres, device=model_device)
+    mel_batch = torch.ones(batch_size, 1, 80, 16, device=model_device)
     model(mel_batch, img_batch)
 
 def read_imgs(img_list):
@@ -178,8 +179,9 @@ def inference(quit_event,batch_size,face_list_cycle,audio_feat_queue,audio_out_q
             img_batch = np.concatenate((img_masked, img_batch), axis=3) / 255.
             mel_batch = np.reshape(mel_batch, [len(mel_batch), mel_batch.shape[1], mel_batch.shape[2], 1])
             
-            img_batch = torch.FloatTensor(np.transpose(img_batch, (0, 3, 1, 2))).to(device)
-            mel_batch = torch.FloatTensor(np.transpose(mel_batch, (0, 3, 1, 2))).to(device)
+            model_device = next(model.parameters()).device
+            img_batch = torch.as_tensor(np.transpose(img_batch, (0, 3, 1, 2)), dtype=torch.float32, device=model_device)
+            mel_batch = torch.as_tensor(np.transpose(mel_batch, (0, 3, 1, 2)), dtype=torch.float32, device=model_device)
 
             with torch.no_grad():
                 pred = model(mel_batch, img_batch)
@@ -220,12 +222,15 @@ class LipReal(BaseReal):
         self.asr.warm_up()
         
         self.render_event = mp.Event()
+        # Track if rendering is already started for this session
+        self._rendering_started = False
+        self._render_thread = None
     
     def __del__(self):
         logger.info(f'lipreal({self.sessionid}) delete')
 
    
-    def process_frames(self,quit_event,loop=None,audio_track=None,video_track=None):
+    def process_frames(self,quit_event,loop=None,audio_track=None,player=None):
         
         while not quit_event.is_set():
             try:
@@ -263,8 +268,24 @@ class LipReal(BaseReal):
             image = combine_frame #(outputs['image'] * 255).astype(np.uint8)
             image[0,:] &= 0xFE
             new_frame = VideoFrame.from_ndarray(image, format="bgr24")
-            #只播放idx为300以内的视频
-            asyncio.run_coroutine_threadsafe(video_track._queue.put((new_frame,None)), loop)
+            
+            # Broadcast frame to all active video tracks for this session only
+            if player and hasattr(player, '_HumanPlayer__video_tracks'):
+                video_tracks = list(player._HumanPlayer__video_tracks)
+                if video_tracks:
+                    logger.info(f"Session {self.sessionid}: Broadcasting frame to {len(video_tracks)} video tracks")
+                    for video_track in video_tracks:
+                        try:
+                            # Check if track is still active before sending
+                            if hasattr(video_track, '_queue') and not video_track._queue.full():
+                                asyncio.run_coroutine_threadsafe(video_track._queue.put((new_frame,None)), loop)
+                            else:
+                                logger.warning(f"Video track queue full or invalid, skipping frame")
+                        except Exception as e:
+                            logger.warning(f"Failed to send frame to video track: {e}")
+                else:
+                    logger.debug(f"No active video tracks to broadcast to for session {self.sessionid}")
+            
             self.record_video_data(image)
 
             for audio_frame in audio_frames:
@@ -280,19 +301,28 @@ class LipReal(BaseReal):
                 #self.notify(eventpoint)
         logger.info('===============================lipreal process_frames thread stop================================')
             
-    def render(self,quit_event,loop=None,audio_track=None,video_track=None):
+    def render(self,quit_event,loop=None,audio_track=None,player=None):
+        # Only start rendering once per LipReal instance
+        if self._rendering_started:
+            logger.info(f'Rendering already started for session {self.sessionid}, skipping')
+            return
+            
+        self._rendering_started = True
+        logger.info(f'Starting rendering for session {self.sessionid}')
+        
         #if self.opt.asr:
         #     self.asr.warm_up()
 
         self.tts.render(quit_event)
         self.init_customindex()
-        process_thread = Thread(target=self.process_frames, args=(quit_event,loop,audio_track,video_track))
+        process_thread = Thread(target=self.process_frames, args=(quit_event,loop,audio_track,player))
         process_thread.start()
         #执行render方法
         print(f'========================lipreal render thread start, sessionid={self.sessionid},self.batch_size ={self.batch_size}========================')
-        Thread(target=inference, args=(quit_event,self.batch_size,self.face_list_cycle,
+        self._render_thread = Thread(target=inference, args=(quit_event,self.batch_size,self.face_list_cycle,
                                            self.asr.feat_queue,self.asr.output_queue,self.res_frame_queue,
-                                           self.model,)).start()  #mp.Process
+                                           self.model,))
+        self._render_thread.start()
 
         #self.render_event.set() #start infer process render
         count=0
@@ -305,16 +335,19 @@ class LipReal(BaseReal):
             t = time.perf_counter()
             self.asr.run_step()
 
-            # if video_track._queue.qsize()>=2*self.opt.batch_size:
-            #     print('sleep qsize=',video_track._queue.qsize())
-            #     time.sleep(0.04*video_track._queue.qsize()*0.8)
-            if video_track._queue.qsize()>=5:
-                # logger.debug('sleep qsize=%d',video_track._queue.qsize())
-                time.sleep(0.04*video_track._queue.qsize()*0.8)
+            # Check queue sizes for all video tracks to prevent overflow
+            if player and hasattr(player, '_HumanPlayer__video_tracks'):
+                max_queue_size = 0
+                for video_track in list(player._HumanPlayer__video_tracks):
+                    max_queue_size = max(max_queue_size, video_track._queue.qsize())
+                
+                if max_queue_size >= 5:
+                    # logger.debug('sleep qsize=%d',max_queue_size)
+                    time.sleep(0.04 * max_queue_size * 0.8)
                 
             # delay = _starttime+_totalframe*0.04-time.perf_counter() #40ms
             # if delay > 0:
             #     time.sleep(delay)
         #self.render_event.clear() #end infer process render
-        logger.info('lipreal thread stop')
+        logger.info(f'lipreal thread stop for session {self.sessionid}')
             

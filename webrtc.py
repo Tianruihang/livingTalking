@@ -164,9 +164,9 @@ def player_worker_thread(
     loop,
     container,
     audio_track,
-    video_track
+    player
 ):
-    container.render(quit_event,loop,audio_track,video_track)
+    container.render(quit_event,loop,audio_track,player)
 
 class HumanPlayer:
 
@@ -176,15 +176,16 @@ class HumanPlayer:
         self.__thread: Optional[threading.Thread] = None
         self.__thread_quit: Optional[threading.Event] = None
 
-        # examine streams
+        # examine streams - support multiple video tracks for multi-connection
         self.__started: Set[PlayerStreamTrack] = set()
         self.__audio: Optional[PlayerStreamTrack] = None
-        self.__video: Optional[PlayerStreamTrack] = None
+        self.__video_tracks: Set[PlayerStreamTrack] = set()  # Changed to support multiple video tracks
 
         self.__audio = PlayerStreamTrack(self, kind="audio")
-        self.__video = PlayerStreamTrack(self, kind="video")
+        # Don't create video track here, create per connection
 
         self.__container = nerfreal
+        self.__sessionid = getattr(nerfreal, 'sessionid', None)  # Store session ID for isolation
 
     def notify(self,eventpoint):
         self.__container.notify(eventpoint)
@@ -196,37 +197,52 @@ class HumanPlayer:
         """
         return self.__audio
 
-    @property
-    def video(self) -> MediaStreamTrack:
+    def create_video_track(self) -> MediaStreamTrack:
         """
-        A :class:`aiortc.MediaStreamTrack` instance if the file contains video.
+        Create a new video track for each connection to avoid frame sharing issues.
         """
-        return self.__video
+        video_track = PlayerStreamTrack(self, kind="video")
+        self.__video_tracks.add(video_track)
+        return video_track
+    
+    def remove_video_track(self, video_track: PlayerStreamTrack) -> None:
+        """
+        Remove a video track when connection is closed.
+        """
+        self.__video_tracks.discard(video_track)
 
     def _start(self, track: PlayerStreamTrack) -> None:
         self.__started.add(track)
-        logger.info(f'-------------------start track {track.kind}, started={len(self.__started)}')
+        logger.info(f'-------------------start track {track.kind}, started={len(self.__started)}, session={self.__sessionid}')
+        
+        # Start rendering thread only once per session, keep it alive for all connections in this session
         if self.__thread is None:
-            self.__log_debug("Starting worker thread")
+            self.__log_debug(f"Starting worker thread for session {self.__sessionid}")
             self.__thread_quit = threading.Event()
             self.__thread = threading.Thread(
-                name="media-player",
+                name=f"media-player-session-{self.__sessionid}",
                 target=player_worker_thread,
                 args=(
                     self.__thread_quit,
                     asyncio.get_event_loop(),
                     self.__container,
                     self.__audio,
-                    self.__video                   
+                    self  # Pass self instead of single video track
                 ),
             )
             self.__thread.start()
+        else:
+            # If thread already exists, just add the track to the existing rendering
+            logger.info(f'Using existing rendering thread for session {self.__sessionid}')
 
     def _stop(self, track: PlayerStreamTrack) -> None:
         self.__started.discard(track)
+        logger.info(f'-------------------stop track {track.kind}, started={len(self.__started)}, session={self.__sessionid}')
 
+        # Don't stop the thread when individual tracks stop
+        # Only stop when ALL tracks are stopped for this session
         if not self.__started and self.__thread is not None:
-            self.__log_debug("Stopping worker thread")
+            self.__log_debug(f"All tracks stopped for session {self.__sessionid}, stopping worker thread")
             self.__thread_quit.set()
             self.__thread.join()
             self.__thread = None
