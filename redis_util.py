@@ -60,6 +60,10 @@ class RedisManager:
     def delete_current_frame(self,key):
         """删除当前帧"""
         self.redis.delete(key)
+    #获取以delete_key开头的key
+    def get_keys_with_prefix(self,prefix):
+        """获取以delete_key开头的key"""
+        return self.redis.keys(f"{prefix}*")
     #增加缓存值
     def set_key_time_value(self, key, time,value):
         """设置当前帧"""

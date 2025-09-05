@@ -140,9 +140,13 @@ async def offer(request):
         if pc.connectionState == "failed":
             await pc.close()
             pcs.discard(pc)
-            # Clean up video track
+            # Clean up tracks
             try:
                 player.remove_video_track(video_track)
+            except Exception:
+                pass
+            try:
+                player.remove_audio_track(audio_track)
             except Exception:
                 pass
             # 关闭时减少引用计数，计数为0再释放资源
@@ -168,9 +172,13 @@ async def offer(request):
                 pass
         if pc.connectionState == "closed":
             pcs.discard(pc)
-            # Clean up video track
+            # Clean up tracks
             try:
                 player.remove_video_track(video_track)
+            except Exception:
+                pass
+            try:
+                player.remove_audio_track(audio_track)
             except Exception:
                 pass
             session_pc_counts[sessionid] = session_pc_counts.get(sessionid, 1) - 1
@@ -232,8 +240,9 @@ async def offer(request):
         session_players[sessionid] = HumanPlayer(nerfreals[sessionid])
     
     player = session_players[sessionid]
-    audio_sender = pc.addTrack(player.audio)
-    # Create a new video track for this connection to avoid frame sharing
+    # Create per-connection audio and video tracks
+    audio_track = player.create_audio_track()
+    audio_sender = pc.addTrack(audio_track)
     video_track = player.create_video_track()
     video_sender = pc.addTrack(video_track)
     capabilities = RTCRtpSender.getCapabilities("video")

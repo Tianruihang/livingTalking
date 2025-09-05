@@ -426,7 +426,7 @@ function __startStatsMonitor() {
             lines.push('  bitrate(v/a): ' + (videoKbps != null ? videoKbps : '?') + '/' + (audioKbps != null ? audioKbps : '?') + ' kbps');
             lines.push('  rtt: ' + (rttMs != null ? rttMs + ' ms' : '?') + '  availOut: ' + (availOutKbps != null ? availOutKbps + ' kbps' : '?'));
             __updateStatsPanel(lines.join('\n'));
-            console.log('[webrtc-stats]', lines.join(' | '));
+            //console.log('[webrtc-stats]', lines.join(' | '));
 
             // Smart switch: if bitrate drops below baseline*threshold for a while, trigger seamless restart
             try{

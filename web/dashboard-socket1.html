@@ -904,7 +904,8 @@
 
             socket.on('message', (data) => {
                 // 判断是否显示visualizer-container
-                if (data.text === '开始可视化') {
+                let sessionId = 'ceyan:questionWaiting:python' + document.getElementById('sessionid').value;
+                if (data.text === '开始可视化' && sessionId === data.sessionId) {
                     //console.log('开始可视化');
                     $('#visualizer').show();
                 } else if (data.text === '停止可视化') {
@@ -912,8 +913,7 @@
                     $('#visualizer').hide();
                 } else {
                     //判断data中的sessionId是否匹配,匹配则展示,否则不处理
-                    console.log('收到消息 sessionId:', document.getElementById('sessionid').value);
-                    if ( data.sessionId !== (""+document.getElementById('sessionid').value)) {
+                    if (document.getElementById('sessionid').value !== data.sessionId) {
                         console.log('收到不匹配的sessionId消息，忽略:', data);
                         return;
                     }

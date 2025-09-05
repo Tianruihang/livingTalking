@@ -294,9 +294,14 @@ class LipReal(BaseReal):
                 new_frame = AudioFrame(format='s16', layout='mono', samples=frame.shape[0])
                 new_frame.planes[0].update(frame.tobytes())
                 new_frame.sample_rate=16000
-                # if audio_track._queue.qsize()>10:
-                #     time.sleep(0.1)
-                asyncio.run_coroutine_threadsafe(audio_track._queue.put((new_frame,eventpoint)), loop)
+                # Broadcast to all active audio tracks (per-connection)
+                try:
+                    if player and hasattr(player, '_HumanPlayer__audio_tracks'):
+                        for a_track in list(player._HumanPlayer__audio_tracks):
+                            if hasattr(a_track, '_queue'):
+                                asyncio.run_coroutine_threadsafe(a_track._queue.put((new_frame,eventpoint)), loop)
+                except Exception:
+                    pass
                 self.record_audio_data(frame)
                 #self.notify(eventpoint)
         logger.info('===============================lipreal process_frames thread stop================================')

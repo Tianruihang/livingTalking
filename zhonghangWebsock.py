@@ -41,13 +41,26 @@ REDIS_WAITING_KEYS="ceyan:questionWaiting:python"
 def push_data():
 
     while True:
-        feature_recorded = redis_manager.get_current_frame(REDIS_WAITING_KEYS)
+        feature_recorded = redis_manager.get_keys_with_prefix(REDIS_WAITING_KEYS)
         print(f'feature_recorded: {feature_recorded}')
-        if feature_recorded != 0:
+        
+        # 检查哪些key仍然有效（未过期）
+        valid_keys = []
+        if feature_recorded:
+            for key in feature_recorded:
+                if redis_manager.redis.exists(key):
+                    valid_keys.append(key)
+        
+        print(f'valid_keys: {valid_keys}')
+        
+        if valid_keys and len(valid_keys) > 0:
             #等待2s
             sleep(2)
-            socketio.emit('message', {'text': f'开始可视化'})
+            # 只有当有有效的key时才推送开始可视化
+            for key in valid_keys:
+                socketio.emit('message', {'text': f'开始可视化','sessionId':key})
         else:
+            # 当没有有效key时推送停止可视化
             socketio.emit('message', {'text': f'停止可视化'})
 
         time.sleep(1)

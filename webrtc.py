@@ -178,11 +178,10 @@ class HumanPlayer:
 
         # examine streams - support multiple video tracks for multi-connection
         self.__started: Set[PlayerStreamTrack] = set()
-        self.__audio: Optional[PlayerStreamTrack] = None
+        self.__audio_tracks: Set[PlayerStreamTrack] = set()
         self.__video_tracks: Set[PlayerStreamTrack] = set()  # Changed to support multiple video tracks
 
-        self.__audio = PlayerStreamTrack(self, kind="audio")
-        # Don't create video track here, create per connection
+        # Don't create tracks here, create per connection
 
         self.__container = nerfreal
         self.__sessionid = getattr(nerfreal, 'sessionid', None)  # Store session ID for isolation
@@ -190,12 +189,13 @@ class HumanPlayer:
     def notify(self,eventpoint):
         self.__container.notify(eventpoint)
 
-    @property
-    def audio(self) -> MediaStreamTrack:
+    def create_audio_track(self) -> MediaStreamTrack:
         """
-        A :class:`aiortc.MediaStreamTrack` instance if the file contains audio.
+        Create a new audio track for each connection to avoid frame sharing issues.
         """
-        return self.__audio
+        audio_track = PlayerStreamTrack(self, kind="audio")
+        self.__audio_tracks.add(audio_track)
+        return audio_track
 
     def create_video_track(self) -> MediaStreamTrack:
         """
@@ -226,7 +226,7 @@ class HumanPlayer:
                     self.__thread_quit,
                     asyncio.get_event_loop(),
                     self.__container,
-                    self.__audio,
+                    None,
                     self  # Pass self instead of single video track
                 ),
             )
@@ -250,6 +250,12 @@ class HumanPlayer:
         if not self.__started and self.__container is not None:
             #self.__container.close()
             self.__container = None
+
+    def remove_audio_track(self, audio_track: PlayerStreamTrack) -> None:
+        """
+        Remove an audio track when connection is closed.
+        """
+        self.__audio_tracks.discard(audio_track)
 
     def __log_debug(self, msg: str, *args) -> None:
         mylogger.debug(f"HumanPlayer {msg}", *args)
